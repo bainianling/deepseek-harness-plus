@@ -486,6 +486,55 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* Move-to-workspace dialog: one full-width target row per workspace. */
+.moveList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  margin-top: 4px;
+  overflow-y: auto;
+}
+
+.moveOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moveOption:hover:not(:disabled) {
+  background: var(--dsw-alias-fill-tsp-secondary);
+}
+
+.moveOption:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.moveOptionTitle {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moveOptionMeta {
+  flex: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide {
     animation: none;

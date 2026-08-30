@@ -20,8 +20,8 @@ describe('resolveDirectoryPickerBackend', () => {
     expect(resolveDirectoryPickerBackend({ ...attended, platform: 'win32' })).toBe('native')
   })
 
-  it('resolves browse for an all-interfaces bind regardless of other signals', () => {
-    expect(resolveDirectoryPickerBackend({ ...attended, bindHost: '0.0.0.0' })).toBe('browse')
+  it('keeps the native chooser for an attended all-interfaces Web listener', () => {
+    expect(resolveDirectoryPickerBackend({ ...attended, bindHost: '0.0.0.0' })).toBe('native')
   })
 
   it('resolves browse under an SSH launch (either env marker)', () => {

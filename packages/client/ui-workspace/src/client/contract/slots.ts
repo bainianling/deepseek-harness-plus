@@ -130,11 +130,23 @@ export type WorkspaceBrowserInjected = {
    */
   archiveSession: (sessionId: SessionId) => Promise<void>
   /**
+   * Durably delete a Session: its stored log is gone, with no undo. A live
+   * session rejects; closing it (or restarting) first is the caller's job.
+   */
+  deleteSession: (sessionId: SessionId) => Promise<void>
+  /**
    * Reorder a session inside its Workspace account (DOM-insertBefore
    * semantics: omitted anchor appends to the end). The view refreshes from
    * the Host response/changed frame; failures leave the order unchanged.
    */
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
+  /**
+   * Move a session into a Workspace's account from wherever it is currently
+   * grouped — cross-workspace moves included (the target adopts it regardless
+   * of the session's directory); the source group refreshes through its own
+   * changed frame.
+   */
+  moveSession: (workspaceId: WorkspaceId, sessionId: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }

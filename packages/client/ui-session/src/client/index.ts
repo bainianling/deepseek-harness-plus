@@ -3,6 +3,7 @@ import { Service, type Context } from '@deepseek-ai/cordis'
 import type {
   ISessions,
   SessionBinding,
+  SessionFace,
   SessionListState,
   SessionSnapshot,
   UseProjection,
@@ -26,6 +27,8 @@ import { renderSessionArea } from './session-provider.tsx'
 
 /** Selector hook over the Session Controller list and current selection. */
 export type UseSessions = SnapshotSelectorHook<SessionListState>
+/** Selector hook over the currently selected Session behavior face. */
+export type UseCurrentSession = SnapshotSelectorHook<SessionFace | undefined>
 /** Selector hook over one Session's lifecycle and control state. */
 export type SessionSnapshotSelector = SnapshotSelectorHook<SessionSnapshot>
 /** Public name for the Session lifecycle selector hook. */
@@ -105,6 +108,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface GlobalStandardProps {
     /** Session list and current selection. */
     useSessions: UseSessions
+    /** Currently selected Session behavior face. */
+    useCurrentSession?: UseCurrentSession
     /** Pending user interaction presented by a Session-scoped UI consumer. */
     useSessionPendingInteraction: UseSessionPendingInteraction
   }
@@ -221,6 +226,14 @@ export class UiSession extends Service {
   private readonly pendingDomains: RuntimePendingDomain[] = []
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
   private readonly pendingListeners = new Set<() => void>()
+  /** Root source of the currently selected Session behavior face. */
+  readonly currentSession: HostObservable<SessionFace | undefined> = {
+    getSnapshot: () => this.currentSessionFace(),
+    subscribe: (listener) => {
+      this.currentListeners.add(listener)
+      return () => { this.currentListeners.delete(listener) }
+    },
+  }
   /** Root source of pending UI interactions, independent from Controller snapshots. */
   readonly pendingInteractions: HostObservable<SessionPendingInteractionSnapshot> = {
     getSnapshot: () => this.pendingSnapshot,
@@ -354,6 +367,11 @@ export class UiSession extends Service {
   private resolveCurrent(): StandardSourceBinding {
     const current = this.sessions.list.getSnapshot().current
     return current === undefined ? this.absent : this.resolve(current) ?? this.absent
+  }
+
+  private currentSessionFace(): SessionFace | undefined {
+    const current = this.sessions.list.getSnapshot().current
+    return current === undefined ? undefined : this.sessions.binding(current)?.session
   }
 
   private publishCurrent(): void {
@@ -507,6 +525,7 @@ export function apply(ctx: Context): void {
   ctx.slots.provideRoot({
     hooks: {
       sessions: ctx.sessions.list,
+      currentSession: service.currentSession,
       sessionPendingInteraction: service.pendingInteractions,
     },
   } satisfies RootStandardSourceContribution)

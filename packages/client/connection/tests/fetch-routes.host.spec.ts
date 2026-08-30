@@ -9,7 +9,7 @@ async function mounted(): Promise<{
 }> {
   const ctx = new Context()
   const fiber = ctx.plugin((pluginCtx) => {
-    new HostConnectionService(pluginCtx, [], {} as BrowserAuth)
+    new HostConnectionService(pluginCtx, () => [], {} as BrowserAuth)
   })
   await fiber.await()
   return {

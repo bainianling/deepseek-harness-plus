@@ -1,0 +1,21 @@
+# dsh-model-bench bundle patch: the model testing bench row.
+#
+# One host row over the web surface: it registers the /api/bench routes on
+# the shared webServer, keeps round directories (round.json + events.jsonl,
+# the AI-generated question, one working directory per contestant model, and
+# the judge verdicts) under $DSH_HOME/model-bench, and drives one full
+# harness agent per selected model through the same question concurrently —
+# every agent mounts the deployment default preset, so all contestants share
+# one identical tool environment while only their model route differs.
+- insert:
+    - id: model-bench
+      name: '@deepseek-ai/dsh-model-bench'
+      inject: [webServer]
+      config:
+        enabled: true
+        maxRounds: 64
+        maxEventTail: 2000
+        maxContestantsPerRound: 12
+        contestantTimeoutMs: 1200000
+        generateTimeoutMs: 600000
+        judgeTimeoutMs: 900000

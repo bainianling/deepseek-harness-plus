@@ -250,7 +250,7 @@ const RESPONSES_COMPAT_GATE = {
   supportsOpenAIGrammarTools: 'withhold',
   supportsAdditionalTools: 'withhold',
   supportsToolSearch: 'withhold',
-  supportsExplicitPromptCacheMode: 'withhold',
+  supportsExplicitPromptCacheMode: 'offer',
 } as const satisfies Record<keyof OpenAIResponsesCompat, CompatDisposition>
 
 /** Disposition of every `AnthropicMessagesCompat` field; a drift gate like the one above. */
@@ -391,6 +391,8 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `anthropic-messages`.
    */
   supportsLongCacheRetention?: boolean
+  /** Whether the Responses endpoint accepts GPT-5.6+ `prompt_cache_options`; Responses protocols only. */
+  supportsExplicitPromptCacheMode?: boolean
   /** Whether the endpoint accepts per-tool `eager_input_streaming`; `anthropic-messages`. */
   supportsEagerToolInputStreaming?: boolean
   /** Whether the endpoint accepts `cache_control` on tool definitions; `anthropic-messages`. */

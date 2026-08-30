@@ -41,6 +41,7 @@ export interface WorkspaceErrorDetailsMap {
     readonly beforeSessionId?: SessionId
   }
   'session-not-found': { readonly sessionId: SessionId }
+  'session-live': { readonly sessionId: SessionId }
 }
 
 /** Workspace business failure returned without throwing a carrier error. */
@@ -118,6 +119,23 @@ export interface WorkspaceInsertSessionBeforeRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
   readonly beforeSessionId?: SessionId
+}
+
+/** Cross-Workspace Session account move (the target adopts the Session). */
+export interface WorkspaceMoveSessionRequest {
+  readonly workspaceId: WorkspaceId
+  readonly sessionId: SessionId
+  readonly beforeSessionId?: SessionId
+}
+
+/** Session requested for durable deletion from every Workspace surface. */
+export interface WorkspaceDeleteSessionRequest {
+  readonly sessionId: SessionId
+}
+
+/** Receipt after one Session is durably deleted. */
+export interface WorkspaceDeleteSessionValue {
+  readonly deleted: true
 }
 
 /** Session requested for archival from Workspace grouping surfaces. */

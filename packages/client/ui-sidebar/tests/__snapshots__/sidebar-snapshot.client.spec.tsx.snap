@@ -60,6 +60,20 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
         xmlns="http://www.w3.org/2000/svg"
       />
     </button>
+    <button
+      aria-label="Task Scheduler"
+      class="automationButton"
+      type="button"
+    >
+      <svg
+        data-content="b7af88db"
+        fill="none"
+        height="18"
+        viewBox="0 0 16 16"
+        width="18"
+        xmlns="http://www.w3.org/2000/svg"
+      />
+    </button>
     <div
       class="regionArea"
     >
@@ -171,6 +185,36 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         />
       </button>
     </div>
+    <div
+      class="wallpaperRow"
+    >
+      <div
+        style="display: flex; align-items: center; gap: 4px;"
+      >
+        <input
+          accept="image/*,video/*"
+          style="display: none;"
+          type="file"
+        />
+        <button
+          aria-label="更换壁纸"
+          class="dsh-wallpaper-pick"
+          style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0px 10px; border: medium; border-radius: 14px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; cursor: pointer;"
+          type="button"
+        >
+          <svg
+            data-content="c5ea0271"
+            fill="none"
+            height="14"
+            viewBox="0 0 16 16"
+            width="14"
+          />
+          <span>
+            壁纸
+          </span>
+        </button>
+      </div>
+    </div>
     <button
       aria-label="New session"
       class="newSession"
@@ -188,6 +232,25 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         class="newSessionLabel wide"
       >
         New Session
+      </span>
+    </button>
+    <button
+      aria-label="Task Scheduler"
+      class="automationButton"
+      type="button"
+    >
+      <svg
+        data-content="b7af88db"
+        fill="none"
+        height="14"
+        viewBox="0 0 16 16"
+        width="14"
+        xmlns="http://www.w3.org/2000/svg"
+      />
+      <span
+        class="automationLabel wide"
+      >
+        Automation
       </span>
     </button>
     <div
@@ -301,6 +364,36 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         />
       </button>
     </div>
+    <div
+      class="wallpaperRow"
+    >
+      <div
+        style="display: flex; align-items: center; gap: 4px;"
+      >
+        <input
+          accept="image/*,video/*"
+          style="display: none;"
+          type="file"
+        />
+        <button
+          aria-label="更换壁纸"
+          class="dsh-wallpaper-pick"
+          style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0px 10px; border: medium; border-radius: 14px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; cursor: pointer;"
+          type="button"
+        >
+          <svg
+            data-content="c5ea0271"
+            fill="none"
+            height="14"
+            viewBox="0 0 16 16"
+            width="14"
+          />
+          <span>
+            壁纸
+          </span>
+        </button>
+      </div>
+    </div>
     <button
       aria-label="新建会话"
       class="newSession"
@@ -318,6 +411,25 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         class="newSessionLabel wide"
       >
         新会话
+      </span>
+    </button>
+    <button
+      aria-label="任务调度"
+      class="automationButton"
+      type="button"
+    >
+      <svg
+        data-content="b7af88db"
+        fill="none"
+        height="14"
+        viewBox="0 0 16 16"
+        width="14"
+        xmlns="http://www.w3.org/2000/svg"
+      />
+      <span
+        class="automationLabel wide"
+      >
+        自动化
       </span>
     </button>
     <div

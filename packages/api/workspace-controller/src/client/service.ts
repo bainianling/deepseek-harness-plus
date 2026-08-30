@@ -74,6 +74,19 @@ export interface IWorkspaces {
     sessionId: SessionId,
     beforeSessionId?: SessionId,
   ): Promise<WorkspaceView>
+  /**
+   * Move a Session into another Workspace account from wherever it is grouped.
+   * @param workspaceId - adopting Workspace.
+   * @param sessionId - Session to move.
+   * @returns the changed target Workspace.
+   */
+  moveSession(workspaceId: WorkspaceId, sessionId: SessionId): Promise<WorkspaceView>
+  /**
+   * Durably delete a Session (stored log removed, no undo). A live Session
+   * rejects; closing it first is the caller's job.
+   * @param sessionId - Session to delete.
+   */
+  deleteSession(sessionId: SessionId): Promise<void>
 }
 
 /** Owns the bare Workspace snapshot and Workspace-only commands. */
@@ -124,6 +137,17 @@ export class WorkspaceController extends Service implements IWorkspaces {
     const result = await this.model.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     if (!result.ok) throw commandError('move', result.error)
     return result.value.workspace
+  }
+
+  async moveSession(workspaceId: WorkspaceId, sessionId: SessionId): Promise<WorkspaceView> {
+    const result = await this.model.moveSession(workspaceId, sessionId)
+    if (!result.ok) throw commandError('session move', result.error)
+    return result.value.workspace
+  }
+
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    const result = await this.model.deleteSession(sessionId)
+    if (!result.ok) throw commandError('session delete', result.error)
   }
 }
 

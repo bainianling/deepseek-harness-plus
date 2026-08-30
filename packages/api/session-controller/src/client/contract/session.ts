@@ -12,9 +12,20 @@ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { PromptContentPart, QueueAction, SessionRequestId } from '../../types.ts'
+import type {
+  PromptContentPart,
+  QueueAction,
+  SessionRequestId,
+  SessionTerminalCloseValue,
+  SessionTerminalListValue,
+  SessionTerminalOpenValue,
+  SessionTerminalReadValue,
+  SessionTerminalSendValue,
+  SessionTerminalSignal,
+  SessionTerminalSignalValue,
+} from '../../types.ts'
 import type { ClientResult } from './result.ts'
-import type { PendingSubmissionImage, SessionSnapshot } from './snapshot.ts'
+import type { PendingSubmissionImage, PendingSubmissionFile, SessionSnapshot } from './snapshot.ts'
 
 /**
  * Why a local submission echo left the snapshot: `observed` when its durable
@@ -32,6 +43,8 @@ export interface BeginSubmissionInput {
   readonly text: string
   /** Ordered image previews matching the upcoming prompt's image parts. */
   readonly images: readonly PendingSubmissionImage[]
+  /** Ordered file cards matching the upcoming prompt's file parts. */
+  readonly files?: readonly PendingSubmissionFile[]
   /** Settlement callback fired exactly once when the echo retires. */
   readonly onRetire?: (retirement: PendingSubmissionRetirement) => void
 }
@@ -106,6 +119,29 @@ export interface ISession {
    * @returns acceptance, or the business error.
    */
   cancel(): Promise<ClientResult<{ accepted: true }>>
+  /** List shell PTYs owned by this Session Agent. */
+  terminalList?(): Promise<ClientResult<SessionTerminalListValue>>
+  /** Create one shell PTY rooted at this Session workspace. */
+  terminalOpen?(name?: string): Promise<ClientResult<SessionTerminalOpenValue>>
+  /** Submit text to one shell PTY and wait for its next boundary. */
+  terminalSend?(
+    terminalSessionId: string,
+    text: string,
+    submit?: boolean,
+  ): Promise<ClientResult<SessionTerminalSendValue>>
+  /** Read one bounded newest-relative scrollback page. */
+  terminalRead?(
+    terminalSessionId: string,
+    offset?: number,
+    count?: number,
+  ): Promise<ClientResult<SessionTerminalReadValue>>
+  /** Deliver one allowed signal to the PTY foreground process group. */
+  terminalSignal?(
+    terminalSessionId: string,
+    signal: SessionTerminalSignal,
+  ): Promise<ClientResult<SessionTerminalSignalValue>>
+  /** Close one PTY and await its complete process tree. */
+  terminalClose?(terminalSessionId: string): Promise<ClientResult<SessionTerminalCloseValue>>
   /**
    * Rename this session (explicit user title; pins it against automatic
    * regeneration).

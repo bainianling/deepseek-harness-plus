@@ -63,12 +63,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
   /**
    * Provide the Host half over the active HTTP server.
    * @param ctx - owning Connection plugin context.
-   * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
+   * @param resolveTrustedHosts - live deployment authorities accepted by the Host/Origin fence.
    * @param browserAuth - process token and persistent browser-session owner.
    */
   constructor(
     ctx: Context,
-    private readonly trustedHosts: readonly string[],
+    private readonly resolveTrustedHosts: () => readonly string[],
     private readonly browserAuth: BrowserAuth,
   ) {
     super(ctx, 'connection')
@@ -94,7 +94,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
 
   /** Apply the configured Host/Origin fence, then browser authentication. */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
-    if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
+    if (!isTrustedApiRequest(request, this.resolveTrustedHosts())) return 403
     return this.browserAuth.isAuthenticated(request) ? undefined : 401
   }
 

@@ -98,6 +98,7 @@ const SESSION_SNAPSHOT_PROPERTIES = {
   type: { type: 'string', required: true },
   pid: { type: 'integer' },
   status: { ...SESSION_STATUS_SCHEMA, required: true },
+  busy: { type: 'boolean', required: true },
 } as const
 
 const SESSION_SNAPSHOT_SCHEMA = {

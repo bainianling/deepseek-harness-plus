@@ -13,26 +13,12 @@
     complete: true
     includeRuntimeContext: false
 
-# The PTY registry is an agent-owned service, so it lives in an entry-local
-# realm. The backend still consumes the host sandbox policy and subprocess
-# implementation, while the tool registers into this agent's scoped catalog.
-# Exactly one shell stack mounts per host: the bash stack gates off win32 and
-# its pwsh twin gates off POSIX, mirroring the one-shot shell rows.
+# Persistent shell tools consume the Host-owned PTY registry and platform shell
+# backend, so model tools and the Web terminal address the same Agent-owned PTYs.
 - id: persistent-shell
   name: cordis:group
   group: true
-  isolate:
-    terminals: true
   config:
-    - id: pty
-      name: '@deepseek-ai/dsh-terminal'
-
-    - id: terminal-bash
-      name: '@deepseek-ai/dsh-terminal-bash'
-      disabled: !!js process.platform === 'win32'
-      config:
-        timeoutMs: 300000
-
     - id: persistent-bash
       name: '@deepseek-ai/dsh-tool-bash-persistent'
       disabled: !!js process.platform === 'win32'
@@ -47,13 +33,6 @@
           * To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.
           * Please avoid commands that may produce a very large amount of output.
           * Please run long lived commands in the background, e.g. 'sleep 10 &' or start a server in the background.
-
-    - id: terminal-pwsh
-      name: '@deepseek-ai/dsh-terminal-bash'
-      disabled: !!js process.platform !== 'win32'
-      config:
-        shellDialect: pwsh
-        timeoutMs: 300000
 
     - id: persistent-pwsh
       name: '@deepseek-ai/dsh-tool-pwsh-persistent'

@@ -77,6 +77,8 @@ body {
 ::-webkit-scrollbar-thumb {
   border-radius: 4px;
   background: var(--dsh-scrollbar-thumb);
+  /* Smooth thumb appearance transition */
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -87,4 +89,18 @@ body {
    matches the transparent track rather than the UA's opaque default. */
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Scrollable area hover hint: show a slightly more visible thumb when the
+   container is hovered, using the hover token. */
+@media (hover: hover) {
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--dsh-scrollbar-thumb) 70%, transparent);
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background: var(--dsh-scrollbar-thumb);
+  }
+  *:hover::-webkit-scrollbar-thumb:hover {
+    background: var(--dsh-scrollbar-thumb-hover);
+  }
 }

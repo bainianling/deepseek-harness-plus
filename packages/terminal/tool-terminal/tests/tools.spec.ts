@@ -220,6 +220,7 @@ describe('tool-terminal foreground API', () => {
             exitCode: number | null;
             signal: string | null;
           };
+          busy: boolean;
         })[];
         terminal_open: {
           sessionId: string;
@@ -233,6 +234,7 @@ describe('tool-terminal foreground API', () => {
             exitCode: number | null;
             signal: string | null;
           };
+          busy: boolean;
           motd: string;
         };
         terminal_read: {

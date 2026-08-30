@@ -371,6 +371,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Folds logged plan/mode state, flushes user selections at turn boundaries, renders deployment-owned guidance, registers /plan, and keeps the plan-exit schema stable across transitions.',
   },
   {
+    key: 'jailbreakMode',
+    pkg: 'jailbreak-mode',
+    title: 'Jailbreak collaboration state',
+    mode: 'core',
+    note: 'Folds logged jailbreak/mode state, flushes user selections at turn boundaries, renders the strategy system block and message wrappers, scaffolds TVD harnesses, and registers /jailbreak.',
+  },
+  {
     key: 'agentPresets',
     pkg: 'agent-presets',
     title: 'Per-session agent composition',

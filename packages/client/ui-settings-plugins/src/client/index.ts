@@ -22,6 +22,7 @@ import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { AgentLoopCard } from './AgentLoopCard.tsx'
 import { BashCard } from './BashCard.tsx'
+import { CompactionCard } from './CompactionCard.tsx'
 import { ConfigurablePluginsTab } from './ConfigurablePluginsTab.tsx'
 import { PluginsSettingsSection } from './PluginsSettingsSection.tsx'
 import type { PluginsSettingsSectionInjected, PluginsSettingsTabEntry } from './PluginsSettingsSection.tsx'
@@ -29,6 +30,7 @@ import { SubagentModelSelectionCard } from './SubagentModelSelectionCard.tsx'
 import { WebSearchCard } from './WebSearchCard.tsx'
 import { AGENT_LOOP_NS, AgentLoopCardController } from './agent-loop-card-controller.ts'
 import { SHELL_NS, BashCardController } from './bash-card-controller.ts'
+import { COMPACTION_NS, CompactionCardController } from './compaction-card-controller.ts'
 import { ConfigurablePluginsTabController } from './tab-store.ts'
 import {
   SUBAGENT_MODEL_SELECTION_NS, SubagentModelSelectionCardController,
@@ -73,6 +75,7 @@ export function apply(ctx: ClientContext): void {
     ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SELECTION_NS }),
     ctx.remote.session,
   )
+  const compaction = new CompactionCardController(ctx.settingsScope.bind({ namespace: COMPACTION_NS }))
 
   // The credential a card reports is not part of any settings section, so its
   // scope publishes nothing when one is written. This is the only signal that
@@ -189,5 +192,11 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: () => webSearch.inject(),
     }, WebSearchCard)
+    yield ctx.slots.register({
+      name: 'settings.plugin.item',
+      key: COMPACTION_NS,
+      locale: NS,
+      inject: () => compaction.inject(),
+    }, CompactionCard)
   })
 }

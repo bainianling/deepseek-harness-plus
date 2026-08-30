@@ -33,6 +33,9 @@
       "path": "../../host/webserver"
     },
     {
+      "path": "../../llm/llm"
+    },
+    {
       "path": "../../util/launch-environment"
     },
     {

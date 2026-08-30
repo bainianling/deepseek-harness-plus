@@ -104,10 +104,16 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
+  // LAN sharing adds the advertised IP literals to the fence only while the
+  // local operator has explicitly enabled sharing; read the live state per request.
+  const activeTrustedHosts = (): readonly string[] => {
+    const lanShare = ctx.get('lanShare') as { trustedHosts?: () => readonly string[] } | undefined
+    return lanShare?.trustedHosts?.() ?? trustedHosts
+  }
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
   const connection = new HostConnectionService(
     ctx,
-    trustedHosts,
+    activeTrustedHosts,
     await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
   )
   const fetchHandler = connection.createSharedFetchHandler(API_PATH)

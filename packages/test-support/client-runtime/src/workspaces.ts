@@ -127,6 +127,20 @@ export class TestWorkspaces implements IWorkspaces {
   }
 
   /**
+   * Move a session into a workspace's account (recorded). The default echoes
+   * a minimal view; stub for failure or list-coupled flows.
+   * @param workspaceId - target workspace.
+   * @param sessionId - session to move.
+   * @returns the updated target view.
+   */
+  async moveSession(workspaceId: WorkspaceId, sessionId: SessionId): Promise<WorkspaceView> {
+    this.calls.push({ method: 'moveSession', args: [workspaceId, sessionId] })
+    const stub = this.stubs.get('moveSession')
+    if (stub !== undefined) return await (stub(workspaceId, sessionId) as Promise<WorkspaceView>)
+    return { workspaceId, title: '', path: '', sessionIds: [sessionId] } as unknown as WorkspaceView
+  }
+
+  /**
    * Archive a session (recorded). The default mirrors the production face's
    * observable effect: the id joins the list state's archive set.
    * @param sessionId - session to archive.
@@ -141,5 +155,15 @@ export class TestWorkspaces implements IWorkspaces {
     await this.update((draft) => {
       draft.archivedSessionIds = [...draft.archivedSessionIds, sessionId]
     })
+  }
+
+  /**
+   * Durably delete a session (recorded; default no-op — fixture callers drive
+   * list snapshots explicitly).
+   * @param sessionId - session to delete.
+   */
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'deleteSession', args: [sessionId] })
+    await (this.stubs.get('deleteSession')?.(sessionId) as Promise<void> | undefined)
   }
 }

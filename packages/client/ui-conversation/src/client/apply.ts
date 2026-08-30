@@ -17,7 +17,7 @@ import type {
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import { createConversationStore } from './stores.ts'
-import { ConversationController, UnsupportedImageMediaTypeError } from './service.ts'
+import { ConversationController } from './service.ts'
 import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './contract/composer-blocks.ts'
@@ -244,7 +244,9 @@ export function apply(ctx: Context): void {
     locale: NS,
     children: {
       'conversation.input.attachments': { kind: 'single', scope: 'session-maybe' },
+      'conversation.input.image-import': { kind: 'single', scope: 'session-maybe' },
       'conversation.input.plan': { kind: 'single', scope: 'session' },
+      'conversation.input.jailbreak': { kind: 'single', scope: 'session' },
       'conversation.input.model': { kind: 'single', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
@@ -273,13 +275,12 @@ export function apply(ctx: Context): void {
         keyboard: shell,
         addImages: (files) => {
           try {
-            const images = conversation.createDraftImages(files)
-            if (!shell.addImages(images.map(image => image.id))) {
-              conversation.releaseDraftImages(images)
+            const attachments = conversation.createDraftAttachments(files)
+            if (!shell.addImages(attachments.map(attachment => attachment.id))) {
+              conversation.releaseDraftImages(attachments)
             }
             return null
           } catch (error: unknown) {
-            if (error instanceof UnsupportedImageMediaTypeError) return t('image.unsupportedType')
             return error instanceof Error ? error.message : String(error)
           }
         },

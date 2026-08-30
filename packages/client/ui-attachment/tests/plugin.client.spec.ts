@@ -4,6 +4,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply as applyHost } from '../src/index.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { ComposerAttachments } from '../src/client/ComposerAttachments.tsx'
+import { ComposerImageImport } from '../src/client/ComposerImageImport.tsx'
 import { MessageImages } from '../src/client/MessageImages.tsx'
 
 async function bench() {
@@ -13,6 +14,7 @@ async function bench() {
     name: 'root',
     children: {
       'conversation.input.attachments': { kind: 'single', scope: 'session-maybe' },
+      'conversation.input.image-import': { kind: 'single', scope: 'session-maybe' },
       'conversation.message.images': { kind: 'single', scope: 'session' },
       'conversation.trajectory.images': { kind: 'single', scope: 'session' },
     },
@@ -34,6 +36,10 @@ describe('attachment plugin', () => {
       locale: 'conversation',
       component: ComposerAttachments,
     }])
+    expect(ctx.slots.entries('conversation.input.image-import')).toMatchObject([{
+      locale: 'conversation',
+      component: ComposerImageImport,
+    }])
     expect(ctx.slots.entries('conversation.message.images')).toMatchObject([{
       locale: 'conversation',
       component: MessageImages,
@@ -46,6 +52,7 @@ describe('attachment plugin', () => {
     await fiber.dispose()
 
     expect(ctx.slots.entries('conversation.input.attachments')).toHaveLength(0)
+    expect(ctx.slots.entries('conversation.input.image-import')).toHaveLength(0)
     expect(ctx.slots.entries('conversation.message.images')).toHaveLength(0)
     expect(ctx.slots.entries('conversation.trajectory.images')).toHaveLength(0)
   })

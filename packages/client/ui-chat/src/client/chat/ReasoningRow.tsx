@@ -6,6 +6,21 @@ import { useThrottledVisualUpdate } from './use-throttled-visual-update.ts'
 import a11yCss from './accessibility.module.css'
 import css from './ReasoningRow.module.css'
 
+const REASONING_CONTROL_TAGS = [
+  '<think>', '</think>', '<thinking>', '</thinking>', '<analysis>', '</analysis>',
+] as const
+
+/** Remove provider control delimiters without changing the durable reasoning block. */
+function visibleReasoning(text: string): string {
+  let visible = text.replace(/<\/?(?:think|thinking|analysis)>/gi, '')
+  const suffixStart = visible.lastIndexOf('<')
+  if (suffixStart < 0) return visible
+  const suffix = visible.slice(suffixStart).toLowerCase()
+  return REASONING_CONTROL_TAGS.some(tag => tag.startsWith(suffix))
+    ? visible.slice(0, suffixStart)
+    : visible
+}
+
 function firstLine(text: string): string {
   const newline = text.indexOf('\n')
   return newline === -1 ? text : text.slice(0, newline)
@@ -27,7 +42,8 @@ function latestLine(text: string): string {
 export function ReasoningRow({ text, running, t }: { text: string; running: boolean; t: ChatViewSlotProps['t'] }) {
   const [expanded, setExpanded] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
-  const summary = running ? latestLine(text) : firstLine(text)
+  const visibleText = visibleReasoning(text)
+  const summary = running ? latestLine(visibleText) : firstLine(visibleText)
   const scheduleSummaryScroll = useThrottledVisualUpdate(() => {
     const element = summaryRef.current
     if (element === null) return
@@ -58,7 +74,7 @@ export function ReasoningRow({ text, running, t }: { text: string; running: bool
           </>
         )}
       >
-        <div className={css.thinkBody}>{text}</div>
+        <div className={css.thinkBody}>{visibleText}</div>
       </DisclosureRow>
     </div>
   )

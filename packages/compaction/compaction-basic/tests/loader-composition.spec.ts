@@ -101,6 +101,26 @@ describe('real Loader composition', () => {
     } as never)).rejects.toThrow(/BasicCompactionConfig: unknown key "models"/)
   })
 
+  it('loads an absolute thresholdTokens policy through the real Loader config path', async () => {
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-token-meter'",
+      "- name: '@deepseek-ai/dsh-compaction-basic'",
+      '  config:',
+      '    thresholdTokens: 2048',
+      '    retainTokens: 256',
+      '    auto: false',
+    ])
+
+    expect(loaded.get('compaction')).toBeInstanceOf(BasicCompactionEngine)
+    expect((loaded.compaction as unknown as BasicCompactionEngine).config).toMatchObject({
+      thresholdTokens: 2048,
+      retainTokens: 256,
+      auto: false,
+    })
+  })
+
   it('rejects a capacity-independent merged ratio conflict during plugin load', async () => {
     context = new Context()
     await context.plugin(LlmRuntime)

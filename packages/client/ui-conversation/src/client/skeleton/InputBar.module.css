@@ -244,6 +244,137 @@
   gap: 12px;
 }
 
+.imageInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.attachments {
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.attachmentSummary {
+  margin-bottom: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.attachmentList {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.attachment {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 132px) 24px;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+  height: 48px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.attachmentThumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.attachmentName {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeAttachment {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.removeAttachment:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* File card glyph box: the same 40px footprint an image thumbnail occupies. */
+.attachmentFileIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Full-viewport file-drop invitation, portaled to the body. */
+.dropOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--dsw-alias-bg-primary) 72%, transparent);
+  pointer-events: none;
+}
+
+.dropPanel {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 40px;
+  border: 1.5px dashed var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-secondary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.dropPanelBlocked {
+  opacity: 0.6;
+}
+
+.dropIcon {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dropTitle {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.dropDesc {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
 /* Attach circle (figma + control): 28px, selector fill, primary glyph. */
 .add {
   display: grid;

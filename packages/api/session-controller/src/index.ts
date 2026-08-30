@@ -20,6 +20,7 @@ import { ApiSessionList, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './list.ts'
 import { buildModelCatalog } from './catalog.ts'
 import { installModelSelectionProjection } from './model-selection-projection.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
+import { SessionTerminalController } from './terminal.ts'
 import type {
   ModelCatalog,
   SessionAttachmentRequest,
@@ -47,6 +48,18 @@ import type {
   SessionSearchValue,
   SessionSelectModelRequest,
   SessionSelectModelValue,
+  SessionTerminalCloseRequest,
+  SessionTerminalCloseValue,
+  SessionTerminalListRequest,
+  SessionTerminalListValue,
+  SessionTerminalOpenRequest,
+  SessionTerminalOpenValue,
+  SessionTerminalReadRequest,
+  SessionTerminalReadValue,
+  SessionTerminalSendRequest,
+  SessionTerminalSendValue,
+  SessionTerminalSignalRequest,
+  SessionTerminalSignalValue,
   SessionUpdateQueueRequest,
   SessionUpdateQueueValue,
 } from './types.ts'
@@ -89,6 +102,7 @@ export class SessionController extends TypertRemoteService {
     'sessions',
     'sessionProjections',
     'sessionQuery',
+    'terminals',
     'typert',
     'workspaceRegistry',
   ]
@@ -102,6 +116,7 @@ export class SessionController extends TypertRemoteService {
   private readonly commands: SessionCommandController
   private readonly controlState: SessionControlController
   private readonly history: SessionHistoryController
+  private readonly terminal: SessionTerminalController
   private readonly listState: ApiSessionList
   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
@@ -116,6 +131,7 @@ export class SessionController extends TypertRemoteService {
     installModelSelectionProjection(ctx)
     this.agents = new ApiSessionAgentController(ctx)
     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
+    this.terminal = new SessionTerminalController(ctx, this.agents)
     this.controlState = new SessionControlController(ctx)
     // Registered before history so reverse-order teardown closes every
     // follower before waiting for already-admitted promotions.
@@ -356,6 +372,42 @@ export class SessionController extends TypertRemoteService {
   @Remote('cancel')
   cancel(request: SessionCancelRequest): SessionCancelValue {
     return this.commands.cancel(request)
+  }
+
+  /** List shell PTYs owned by the addressed Session Agent. */
+  @Remote('terminalList')
+  terminalList(request: SessionTerminalListRequest): Promise<SessionTerminalListValue> {
+    return this.terminal.list(request)
+  }
+
+  /** Create one shell PTY rooted at the Session workspace. */
+  @Remote('terminalOpen')
+  terminalOpen(request: SessionTerminalOpenRequest): Promise<SessionTerminalOpenValue> {
+    return this.terminal.open(request)
+  }
+
+  /** Submit text to one Session-owned PTY and wait for its next boundary. */
+  @Remote('terminalSend')
+  terminalSend(request: SessionTerminalSendRequest): Promise<SessionTerminalSendValue> {
+    return this.terminal.send(request)
+  }
+
+  /** Read one bounded page from a Session-owned PTY scrollback. */
+  @Remote('terminalRead')
+  terminalRead(request: SessionTerminalReadRequest): Promise<SessionTerminalReadValue> {
+    return this.terminal.read(request)
+  }
+
+  /** Deliver one allowed signal to a Session-owned PTY foreground process group. */
+  @Remote('terminalSignal')
+  terminalSignal(request: SessionTerminalSignalRequest): Promise<SessionTerminalSignalValue> {
+    return this.terminal.signal(request)
+  }
+
+  /** Close one Session-owned PTY and await its process tree. */
+  @Remote('terminalClose')
+  terminalClose(request: SessionTerminalCloseRequest): Promise<SessionTerminalCloseValue> {
+    return this.terminal.close(request)
   }
 
   /**

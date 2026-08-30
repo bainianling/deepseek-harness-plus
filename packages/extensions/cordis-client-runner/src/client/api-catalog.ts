@@ -439,7 +439,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'BeginSubmissionInput',
-    declaration: 'export interface BeginSubmissionInput {\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly onRetire?: (retirement: PendingSubmissionRetirement) => void;\n}',
+    declaration: 'export interface BeginSubmissionInput {\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly files?: readonly PendingSubmissionFile[];\n    readonly onRetire?: (retirement: PendingSubmissionRetirement) => void;\n}',
   },
   {
     name: 'BoundActions',
@@ -607,7 +607,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingSubmission',
-    declaration: 'export interface PendingSubmission {\n    readonly requestId: SessionRequestId;\n    readonly time: number;\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n}',
+    declaration: 'export interface PendingSubmission {\n    readonly requestId: SessionRequestId;\n    readonly time: number;\n    readonly text: string;\n    readonly images: readonly PendingSubmissionImage[];\n    readonly files?: readonly PendingSubmissionFile[];\n}',
+  },
+  {
+    name: 'PendingSubmissionFile',
+    declaration: 'export interface PendingSubmissionFile {\n    readonly name?: string;\n    readonly size: number;\n}',
   },
   {
     name: 'PendingSubmissionImage',
@@ -623,7 +627,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PromptContentPart',
-    declaration: 'export type PromptContentPart = {\n    readonly type: \'text\';\n    readonly text: string;\n} | {\n    readonly type: \'image\';\n    readonly mediaType: ImageMediaType;\n    readonly data: string;\n    readonly name?: string;\n};',
+    declaration: 'export type PromptContentPart = {\n    readonly type: \'text\';\n    readonly text: string;\n} | {\n    readonly type: \'image\';\n    readonly mediaType: ImageMediaType;\n    readonly data: string;\n    readonly name?: string;\n} | {\n    readonly type: \'file\';\n    readonly name: string;\n    readonly data: string;\n};',
   },
   {
     name: 'PromptError',

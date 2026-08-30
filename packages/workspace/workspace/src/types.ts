@@ -85,6 +85,20 @@ export interface Workspace {
   insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>
 
   /**
+   * Account one session by explicit user intent — the cross-workspace move's
+   * landing step — skipping the header-cwd validation {@link attachSession}
+   * applies: the session's canonical cwd may name another workspace, and the
+   * explicit placement is what makes that irrelevant (the id is recorded as
+   * adopted, so cwd-derived filtering never prunes it). Ordering follows
+   * {@link insertSessionBefore}; adopting a session already accounted here
+   * only reorders it. Decided on the domain write chain like every mutation.
+   * @param sessionId - The session to adopt.
+   * @param beforeSessionId - Accounted anchor to insert before; omitted appends.
+   * @returns resolution after durability.
+   */
+  adoptSession(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>
+
+  /**
    * Remove a session from this workspace's account. Idempotent: an id not on
    * the account resolves without writing, aside from the durable
    * filtered-candidate prune every accepted mutation performs; decided on

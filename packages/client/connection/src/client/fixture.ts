@@ -307,6 +307,13 @@ interface WorkspaceInsertSessionBeforeRequest {
 }
 interface WorkspaceArchiveSessionRequest { readonly sessionId: SessionId }
 interface WorkspaceArchiveValue { readonly archivedSessionIds: readonly SessionId[] }
+interface WorkspaceMoveSessionRequest {
+  readonly workspaceId: WorkspaceId
+  readonly sessionId: SessionId
+  readonly beforeSessionId?: SessionId
+}
+interface WorkspaceDeleteSessionRequest { readonly sessionId: SessionId }
+interface WorkspaceDeleteSessionValue { readonly deleted: true }
 
 type WorkspaceFollowFrame =
   | {
@@ -328,6 +335,8 @@ interface FixtureWorkspaceApi {
   insertBefore(request: WorkspaceInsertBeforeRequest): Promise<ConnectionRpcResult<WorkspaceOrderValue>>
   insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<ConnectionRpcResult<WorkspaceValue>>
   archiveSession(request: WorkspaceArchiveSessionRequest): Promise<ConnectionRpcResult<WorkspaceArchiveValue>>
+  moveSession(request: WorkspaceMoveSessionRequest): Promise<ConnectionRpcResult<WorkspaceValue>>
+  deleteSession(request: WorkspaceDeleteSessionRequest): Promise<ConnectionRpcResult<WorkspaceDeleteSessionValue>>
 }
 
 interface FixtureWorkspace {
@@ -3389,6 +3398,79 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       }
       return sessionOk({ archivedSessionIds: [...archivedSessionIds] })
     },
+    moveSession: (request) => {
+      const missing = requireRemoteSession(request)
+      if (missing !== undefined) return missing
+      const target = workspaces.find(workspace => workspace.workspaceId === request.workspaceId)
+      if (target === undefined) {
+        return sessionErr({
+          code: 'workspace-not-found',
+          message: `no workspace ${request.workspaceId}`,
+          details: { workspaceId: request.workspaceId },
+        })
+      }
+      // The anchor is validated against the TARGET account before any write:
+      // the detach pass below is unconditional, so a late anchor rejection
+      // would leave the session ungrouped instead of unmoved.
+      if (request.beforeSessionId !== undefined && !target.sessionIds.includes(request.beforeSessionId)) {
+        return sessionErr({
+          code: 'workspace-move-invalid',
+          message: `anchor is not accounted by workspace ${request.workspaceId}`,
+          details: {
+            workspaceId: request.workspaceId,
+            sessionId: request.sessionId,
+            beforeSessionId: request.beforeSessionId,
+          },
+        })
+      }
+      // Detach from EVERY account first (the target included), so the state
+      // never accounts one session twice; adopting back lands the anchor.
+      for (const workspace of workspaces) {
+        if (!workspace.sessionIds.includes(request.sessionId)) continue
+        workspace.sessionIds = workspace.sessionIds.filter(id => id !== request.sessionId)
+        workspace.updatedAt = new Date().toISOString()
+        emitWorkspace({ type: 'upsert', workspace: workspaceSnapshot(workspace) })
+      }
+      const at = request.beforeSessionId === undefined
+        ? target.sessionIds.length
+        : target.sessionIds.indexOf(request.beforeSessionId)
+      target.sessionIds.splice(at === -1 ? target.sessionIds.length : at, 0, request.sessionId)
+      target.updatedAt = new Date().toISOString()
+      emitWorkspace({ type: 'upsert', workspace: workspaceSnapshot(target) })
+      return sessionOk({ workspace: workspaceSnapshot(target) })
+    },
+    deleteSession: (request) => {
+      const summary = summaryOf(request.sessionId)
+      if (summary === undefined) {
+        return sessionErr({
+          code: 'session-not-found',
+          message: `no session ${request.sessionId}`,
+          details: { sessionId: request.sessionId },
+        })
+      }
+      if (summary.running) {
+        return sessionErr({
+          code: 'session-live',
+          message: `session ${request.sessionId} is live; close it first`,
+          details: { sessionId: request.sessionId },
+        })
+      }
+      const archivedIndex = archivedSessionIds.indexOf(request.sessionId)
+      if (archivedIndex !== -1) {
+        archivedSessionIds.splice(archivedIndex, 1)
+        emitWorkspace({ type: 'archived', archivedSessionIds: [...archivedSessionIds] })
+      }
+      for (const workspace of workspaces) {
+        if (!workspace.sessionIds.includes(request.sessionId)) continue
+        workspace.sessionIds = workspace.sessionIds.filter(id => id !== request.sessionId)
+        workspace.updatedAt = new Date().toISOString()
+        emitWorkspace({ type: 'upsert', workspace: workspaceSnapshot(workspace) })
+      }
+      sessions.splice(sessions.findIndex(candidate => candidate.sessionId === request.sessionId), 1)
+      logs.delete(request.sessionId)
+      emitRemote('api-session/removed', [request.sessionId])
+      return sessionOk({ deleted: true })
+    },
   }
 
   const rpc: ClientConnectionRpc = {
@@ -3571,6 +3653,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           request as WorkspaceInsertSessionBeforeRequest,
         )
         case 'workspace/archiveSession': return workspaceApi.archiveSession(request as WorkspaceArchiveSessionRequest)
+        case 'workspace/moveSession': return workspaceApi.moveSession(request as WorkspaceMoveSessionRequest)
+        case 'workspace/deleteSession': return workspaceApi.deleteSession(request as WorkspaceDeleteSessionRequest)
         default:
           return Promise.reject(new Error(`fixture connection RPC endpoint ${JSON.stringify(endpoint)} is unavailable`))
       }

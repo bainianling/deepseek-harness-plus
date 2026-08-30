@@ -65,6 +65,14 @@ export interface ISessions {
    * @returns completion of the current or newly started refresh.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void>
+  /**
+   * Re-pull the session list baseline from the Host. The one refresh path for
+   * list rows whose host-side change carries no push frame — a durably
+   * deleted cold session, for example, leaves no `host/session-removed`
+   * behind because it was never live.
+   * @returns completion of the current or newly started baseline pull.
+   */
+  refresh(): Promise<void>
 
   /** Clear the current selection into the no-session view state. */
   clear(): void

@@ -27,6 +27,20 @@ export class WorkspaceMoveInvalidError extends Error {
 }
 
 /**
+ * A cross-workspace move named an anchor the target account does not hold
+ * (the moved session itself is inserted by the move, so it is never the miss).
+ */
+export class WorkspaceAdoptInvalidError extends Error {
+  /**
+   * @param message - Which id was unaccounted and where.
+   */
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorkspaceAdoptInvalidError'
+  }
+}
+
+/**
  * The registry-owned machinery an entity mutates through. Entities never see
  * the registry itself — only the open table, the canonical session-path
  * index backing the `sessionIds` projection, and attach-time header reads.
@@ -45,6 +59,14 @@ export interface WorkspaceEntityHost {
    * missing or its cwd cannot identify an existing directory.
    */
   sessionPath(id: SessionId): string | undefined
+
+  /**
+   * Whether the header index holds any header for the id — the existence
+   * check an adopted membership keeps passing (its cwd may name another
+   * workspace, but the session itself must still exist).
+   * @param id - Session whose indexed presence is requested.
+   */
+  hasSession(id: SessionId): boolean
 
   /**
    * Read one stored session header for attach validation.
@@ -99,7 +121,13 @@ export class WorkspaceEntity implements Workspace {
   }
 
   get sessionIds(): readonly SessionId[] {
-    return this.record.sessionIds.filter(id => this.host.sessionPath(id) === this.record.path)
+    // Explicitly adopted members are accounted regardless of where their
+    // header cwd points — the move that placed them is the user's intent —
+    // but a session whose header is gone entirely is pruned like any other
+    // vanished candidate.
+    const adopted = new Set(this.record.adoptedSessionIds)
+    return this.record.sessionIds.filter(id =>
+      adopted.has(id) || this.host.sessionPath(id) === this.record.path)
   }
 
   async setTitle(title: string): Promise<void> {
@@ -171,9 +199,53 @@ export class WorkspaceEntity implements Workspace {
     })
   }
 
+  /**
+   * Account one session by explicit user intent, skipping the header-cwd
+   * validation `attachSession` applies. This is the cross-workspace move's
+   * landing step: the session's canonical cwd names some other workspace (or
+   * nothing at all), and the move is what makes that irrelevant — the
+   * membership is the user's decision, recorded as an adopted id so the cwd
+   * filter never prunes it. Ordering follows {@link insertSessionBefore};
+   * adopting a session already accounted here only reorders it.
+   * @param sessionId - The session to adopt.
+   * @param beforeSessionId - Accounted anchor to insert before; omitted appends.
+   */
+  async adoptSession(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> {
+    await this.mutate((record) => {
+      if (beforeSessionId !== undefined && !record.sessionIds.includes(beforeSessionId)) {
+        throw new WorkspaceAdoptInvalidError(
+          `cannot move session '${sessionId}' before '${beforeSessionId}' in workspace '${record.path}': `
+          + 'the anchor session is not accounted',
+        )
+      }
+      const without = record.sessionIds.filter(id => id !== sessionId)
+      const at = beforeSessionId === undefined ? without.length : without.indexOf(beforeSessionId)
+      const sessionIds = [...without.slice(0, at), sessionId, ...without.slice(at)]
+      // Only a member whose canonical cwd does NOT match this workspace needs
+      // the adopted mark — a matching cwd derives its membership the ordinary
+      // way, so a same-workspace reorder never accumulates marks.
+      const alreadyMarked = record.adoptedSessionIds.includes(sessionId)
+      const adoptedSessionIds = alreadyMarked || this.host.sessionPath(sessionId) !== record.path
+        ? alreadyMarked
+          ? record.adoptedSessionIds
+          : [sessionId, ...record.adoptedSessionIds]
+        : record.adoptedSessionIds
+      if (sessionIds.every((id, index) => id === record.sessionIds[index])
+        && adoptedSessionIds.length === record.adoptedSessionIds.length) {
+        return record
+      }
+      return { ...record, sessionIds, adoptedSessionIds }
+    })
+  }
+
   async detachSession(sessionId: SessionId): Promise<void> {
     await this.mutate(record => record.sessionIds.includes(sessionId)
-      ? { ...record, sessionIds: record.sessionIds.filter(id => id !== sessionId) }
+      || record.adoptedSessionIds.includes(sessionId)
+      ? {
+        ...record,
+        sessionIds: record.sessionIds.filter(id => id !== sessionId),
+        adoptedSessionIds: record.adoptedSessionIds.filter(id => id !== sessionId),
+      }
       : record)
   }
 
@@ -190,8 +262,8 @@ export class WorkspaceEntity implements Workspace {
   /**
    * The single write path: run `fn` on the domain write chain via
    * `table.update`, stamping `updatedAt` and pruning candidates that no
-   * longer pass the id-plus-canonical-cwd membership check, then swap the
-   * snapshot.
+   * longer pass the id-plus-canonical-cwd membership check (adopted ids are
+   * exempt — the explicit move is their membership), then swap the snapshot.
    *
    * `fn` sees the value current at its chain slot, so membership decisions
    * (attach/detach idempotence) are race-free against queued writes; a fn
@@ -204,8 +276,9 @@ export class WorkspaceEntity implements Workspace {
     try {
       next = await this.host.table().update(this.id, (current) => {
         const changed = fn(current)
+        const adopted = new Set(changed.adoptedSessionIds)
         const sessionIds = changed.sessionIds.filter(
-          id => this.host.sessionPath(id) === changed.path,
+          id => adopted.has(id) || this.host.sessionPath(id) === changed.path,
         )
         if (changed === current && sessionIds.length === current.sessionIds.length) {
           throw unchangedSentinel

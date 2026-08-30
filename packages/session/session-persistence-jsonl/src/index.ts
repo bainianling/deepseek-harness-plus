@@ -464,6 +464,21 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     return (await this.listArtifacts(signal)).map(artifact => artifact.header)
   }
 
+  /**
+   * Durably remove one session's log file. An id with no materialized artifact
+   * (a created-but-never-appended session, or an already-deleted id) is a
+   * no-op success; every other I/O failure propagates.
+   */
+  override async delete(id: SessionId, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    signal?.throwIfAborted()
+    const path = await this.findLog(id, signal)
+    if (path === undefined) return
+    await rm(path, { force: false })
+    signal?.throwIfAborted()
+  }
+
   /** List metadata plus a stat-derived identity for each append-only log. */
   async listSnapshots(signal?: AbortSignal): Promise<SessionPersistenceSnapshot[]> {
     const snapshots: SessionPersistenceSnapshot[] = []

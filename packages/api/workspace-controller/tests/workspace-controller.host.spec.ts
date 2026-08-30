@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
-import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
+import WorkspaceRegistry, { WorkspaceAdoptInvalidError } from '@deepseek-ai/dsh-workspace'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import WorkspaceController from '../src/index.ts'
 import { WorkspaceFeed } from '../src/feed.ts'
@@ -41,7 +42,12 @@ async function harness() {
   const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', storageDomain)
   ctx.provide('storageDomain', storageDomain)
-  ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+  const persistedHeaders: SessionHeader[] = []
+  const deletePersisted = vi.fn(async (): Promise<void> => {})
+  ctx.provide('sessionPersistence', {
+    list: () => Promise.resolve(persistedHeaders),
+    delete: deletePersisted,
+  } as never)
   await ctx.plugin(WorkspaceRegistry)
   const dispose = (): void => {}
   ctx.provide('typert', {
@@ -49,7 +55,7 @@ async function harness() {
     contexts: { configureHost: () => dispose },
   } as never)
   const controller = new WorkspaceController(ctx)
-  return { controller, ctx, root, storageDomain }
+  return { controller, ctx, root, storageDomain, persistedHeaders, deletePersisted }
 }
 
 function stageDir(root: string, name: string): string {
@@ -217,6 +223,88 @@ describe('WorkspaceController commands', () => {
       .resolves.toEqual({ archivedSessionIds: [session.id] })
     await expect(controller.archiveSession({ sessionId: SessionId('unknown') }))
       .rejects.toMatchObject({ failure: { code: 'session-not-found' } })
+  })
+
+  it('moves a Session across Workspace accounts and maps move failures', async () => {
+    const { controller, ctx, root } = await harness()
+    const first = await controller.create({ path: stageDir(root, 'first') })
+    const second = await controller.create({ path: stageDir(root, 'second') })
+    const session = ctx.sessions.create(SessionId('movable'), {
+      meta: { cwd: first.workspace.path },
+    })
+    const firstEntity = ctx.workspaceRegistry.get(first.workspace.workspaceId)
+    if (firstEntity === undefined) throw new Error('fixture Workspace disappeared')
+    await firstEntity.attachSession(session.id)
+
+    await expect(controller.moveSession({
+      workspaceId: second.workspace.workspaceId,
+      sessionId: session.id,
+    })).resolves.toMatchObject({ workspace: { sessionIds: [session.id] } })
+    expect(ctx.workspaceRegistry.get(first.workspace.workspaceId)?.sessionIds).not.toContain(session.id)
+
+    await expect(controller.moveSession({
+      workspaceId: 'missing' as WorkspaceId,
+      sessionId: session.id,
+    })).rejects.toMatchObject({ failure: { code: 'workspace-not-found' } })
+    await expect(controller.moveSession({
+      workspaceId: first.workspace.workspaceId,
+      sessionId: SessionId('missing-session'),
+    })).rejects.toMatchObject({ failure: { code: 'session-not-found' } })
+    await expect(controller.moveSession({
+      workspaceId: first.workspace.workspaceId,
+      sessionId: session.id,
+      beforeSessionId: SessionId('missing-anchor'),
+    })).rejects.toMatchObject({
+      failure: { code: 'workspace-move-invalid', details: { beforeSessionId: 'missing-anchor' } },
+    })
+
+    // The registry only raises adopt-invalid for a present anchor today; a
+    // future adopt failure without one must still omit the anchor detail.
+    vi.spyOn(ctx.workspaceRegistry, 'moveSession')
+      .mockRejectedValueOnce(new WorkspaceAdoptInvalidError('adopt rejected'))
+    let adoptInvalid: unknown
+    await controller.moveSession({
+      workspaceId: second.workspace.workspaceId,
+      sessionId: session.id,
+    }).catch(error => { adoptInvalid = error })
+    expect(adoptInvalid).toMatchObject({
+      failure: {
+        code: 'workspace-move-invalid',
+        details: { workspaceId: second.workspace.workspaceId, sessionId: session.id },
+      },
+    })
+    expect(Object.keys((adoptInvalid as { failure: { details: object } }).failure.details))
+      .not.toContain('beforeSessionId')
+
+    const moveFailure = new Error('membership storage failed')
+    vi.spyOn(ctx.workspaceRegistry, 'moveSession').mockRejectedValueOnce(moveFailure)
+    await expect(controller.moveSession({
+      workspaceId: second.workspace.workspaceId,
+      sessionId: session.id,
+    })).rejects.toBe(moveFailure)
+  })
+
+  it('deletes persisted Sessions, rejects live or unknown ones, and surfaces persistence faults', async () => {
+    const { controller, ctx, root, persistedHeaders, deletePersisted } = await harness()
+    const first = await controller.create({ path: stageDir(root, 'first') })
+    const session = ctx.sessions.create(SessionId('live'), {
+      meta: { cwd: first.workspace.path },
+    })
+
+    await expect(controller.deleteSession({ sessionId: session.id }))
+      .rejects.toMatchObject({ failure: { code: 'session-live' } })
+    await expect(controller.deleteSession({ sessionId: SessionId('unknown') }))
+      .rejects.toMatchObject({ failure: { code: 'session-not-found' } })
+
+    const cold = SessionId('cold')
+    persistedHeaders.push({ version: 0, id: cold, createdAt: 1 })
+    await expect(controller.deleteSession({ sessionId: cold }))
+      .resolves.toEqual({ deleted: true })
+    expect(deletePersisted).toHaveBeenCalledWith(cold)
+
+    const deleteFailure = new Error('persistence unavailable')
+    vi.spyOn(ctx.workspaceRegistry, 'deleteSession').mockRejectedValueOnce(deleteFailure)
+    await expect(controller.deleteSession({ sessionId: cold })).rejects.toBe(deleteFailure)
   })
 })
 

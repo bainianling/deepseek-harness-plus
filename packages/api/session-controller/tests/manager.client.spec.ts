@@ -778,6 +778,20 @@ describe('connected generation', () => {
     expect(api.callsOf('session.history')).toHaveLength(historyCallsBefore)
   })
 
+  it('reopens only the selected session so the visible conversation resumes live updates', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({
+      items: [summary(S1), summary(S2, { updatedAt: 200 })] as never[],
+    }))
+    const manager = new SessionManager(fakeRemote(api), S1)
+    manager.get(S2) // instantiated but never selected
+    manager.handleConnected()
+    await vi.waitFor(() => {
+      expect(api.followStarts).toEqual([S1])
+      expect(manager.getListSnapshot().current).toBe(S1)
+    })
+  })
+
   it('retains the durable parent address and refreshes its catalogs across reconnect', async () => {
     const api = new FakeApiClient()
     const address = {

@@ -21,6 +21,8 @@ export interface AfterScheduleRecord {
   readonly afterSeconds: number
   /** Four-digit-year RFC 3339 UTC target. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 
 /** Durable one-shot reminder created from an absolute instant. */
@@ -33,6 +35,8 @@ export interface AtScheduleRecord {
   readonly prompt: string
   /** Four-digit-year RFC 3339 UTC target. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 
 /** Durable fixed-rate reminder whose next target remains creation-anchor-aligned. */
@@ -47,6 +51,8 @@ export interface EveryScheduleRecord {
   readonly everySeconds: number
   /** Earliest anchor-aligned occurrence not yet dispatched. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 
 /** Structured local-calendar input accepted by `schedule_create`. */
@@ -116,6 +122,8 @@ export type ScheduleView = ScheduleRecord & {
   readonly state: ScheduleState
   /** Reminder delivery never leaves the owning session. */
   readonly deliveryMode: ScheduleDeliveryMode
+  /** Whether this task defers to idle windows. */
+  readonly idlePriority: boolean
 }
 
 /** Management operations whose persistence barrier may be uncertain. */

@@ -100,10 +100,41 @@ function compactSource(event: Parameters<ConversationNodeDefinition['match']>[0]
  * @param checkpoint - replacement checkpoint Match.
  * @returns final compaction summary Node data.
  */
+function isNonnegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function summaryUsage(data: { usage?: unknown }): CompactionSummaryNode['summaryUsage'] | undefined {
+  const usage = data.usage
+  if (typeof usage !== 'object' || usage === null) return undefined
+  const value = usage as Record<string, unknown>
+  const inputTokens = value.inputTokens
+  if (!isNonnegativeSafeInteger(inputTokens)) return undefined
+  const cacheReadTokens = value.cacheReadTokens
+  const cacheWriteTokens = value.cacheWriteTokens
+  if (cacheReadTokens !== undefined && !isNonnegativeSafeInteger(cacheReadTokens)) return undefined
+  if (cacheWriteTokens !== undefined && !isNonnegativeSafeInteger(cacheWriteTokens)) return undefined
+  return {
+    inputTokens,
+    ...cacheReadTokens === undefined ? {} : { cacheReadTokens },
+    ...cacheWriteTokens === undefined ? {} : { cacheWriteTokens },
+  }
+}
+
+/**
+ * Build the compaction-summary conversation node: the summary text, shadowed
+ * item/token counts, and summary usage are read from the matched
+ * `compaction/summary` event when present (each field validated, else `null`
+ * or absent), while `seq` and `time` anchor to the compaction checkpoint.
+ * @param match The matched `compaction/summary` event, when one exists.
+ * @param checkpoint The compaction checkpoint the summary belongs to.
+ * @returns The render-ready compaction summary node.
+ */
 function compactSummary(match: ConversationMatch | undefined, checkpoint: ConversationMatch): CompactionSummaryNode {
   let summary: string | null = null
   let shadowedItemCount: number | null = null
   let shadowedTokenCount: number | null = null
+  let usage: CompactionSummaryNode['summaryUsage'] | undefined
   if (match?.event.type === 'compaction/summary') {
     const data = match.event.data
     if (Array.isArray(data.summary)) {
@@ -120,6 +151,7 @@ function compactSummary(match: ConversationMatch | undefined, checkpoint: Conver
       && data.shadowedTokenCount >= 0
       ? data.shadowedTokenCount
       : null
+    usage = summaryUsage(data)
   }
   return {
     kind: 'compaction',
@@ -129,6 +161,7 @@ function compactSummary(match: ConversationMatch | undefined, checkpoint: Conver
     summaryEventSeq: match?.event.seq ?? null,
     shadowedItemCount,
     shadowedTokenCount,
+    ...usage === undefined ? {} : { summaryUsage: usage },
   }
 }
 

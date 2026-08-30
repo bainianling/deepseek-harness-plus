@@ -11,10 +11,13 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceDeleteValue,
   WorkspaceFollowFrame,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
+  WorkspaceMoveSessionRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
   WorkspaceValue,
@@ -107,6 +110,26 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('archiveSession')
   archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     return this.commands.archiveSession(request)
+  }
+
+  /**
+   * Move one accounted Session into a target Workspace account.
+   * @param request - target Workspace, Session, and optional anchor identities.
+   * @returns the updated target Workspace projection.
+   */
+  @Remote('moveSession')
+  moveSession(request: WorkspaceMoveSessionRequest): Promise<WorkspaceValue> {
+    return this.commands.moveSession(request)
+  }
+
+  /**
+   * Durably delete one Session from every Workspace account and persistence.
+   * @param request - Session identity to delete.
+   * @returns deletion confirmation.
+   */
+  @Remote('deleteSession')
+  deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteSessionValue> {
+    return this.commands.deleteSession(request)
   }
 
   /**

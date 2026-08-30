@@ -17,6 +17,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 // Type-only: pulls the ui-conversation SlotMap merge (the input.model seat).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: pulls the sidebar footer-action SlotMap merge.
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -26,12 +28,14 @@ import type { ModelDirectoryState } from './directory.ts'
 import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
+import { ModelBalanceAction, type ModelBalanceActionInjected } from './ModelBalanceAction.tsx'
 import { en, zh, type ModelKey } from './locales.ts'
 
 export { ModelDirectory } from './directory.ts'
 export type { ModelDirectoryState } from './directory.ts'
 export { ModelDirectoryResolver } from './service.ts'
 export type { ModelSelectInjected } from './slots.ts'
+export type { ModelBalanceActionInjected, ModelBalanceActionProps } from './ModelBalanceAction.tsx'
 export type { ModelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -176,5 +180,14 @@ export function apply(ctx: ClientContext): void {
         }
       },
     }, ModelSelect))
+    scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
+      name: 'sidebar.footer.action',
+      id: 'model-balance',
+      order: -100,
+      locale: NS,
+      inject: (): ModelBalanceActionInjected => ({
+        directoryFor: sessionId => models.directoryFor(sessionId),
+      }),
+    }, ModelBalanceAction))
   })
 }

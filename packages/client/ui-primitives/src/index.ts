@@ -59,4 +59,10 @@ export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels } from '.
 export { MessageText } from './markdown/MessageText.tsx'
 export { extractMarkdownPlainText } from './markdown/plain-text.ts'
 export type { MarkdownPlainTextMode, MarkdownPlainTextOptions } from './markdown/plain-text.ts'
+export { WallpaperLayer } from './WallpaperLayer.tsx'
+export { WallpaperPicker } from './WallpaperPicker.tsx'
+export {
+  getWallpaper, subscribeWallpaper, setWallpaperFromFile, clearWallpaper, initWallpaper, WALLPAPER_BODY_ATTR,
+} from './wallpaper.ts'
+export type { WallpaperView } from './wallpaper.ts'
 export * from './icons/index.tsx'

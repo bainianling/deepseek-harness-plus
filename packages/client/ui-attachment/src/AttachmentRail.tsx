@@ -176,6 +176,13 @@ export function AttachmentRail<T extends AttachmentRailItem>({ items, labels, on
             </button>
             <button
               type="button"
+              className={css.name}
+              onClick={() => { onOpen(item) }}
+            >
+              {item.alt}
+            </button>
+            <button
+              type="button"
               className={css.remove}
               aria-label={item.removeLabel}
               onClick={() => { onRemove(item) }}

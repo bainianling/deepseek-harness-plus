@@ -75,6 +75,13 @@ export interface SessionInputDeps {
     release(ids: readonly DraftAttachmentId[]): void
     /** Localized composer notice for a claimed command that does not accept images. */
     unsupportedNotice(token: string): string
+    /** Localized composer notice for a claimed command carrying plain file attachments. */
+    filesUnsupportedNotice(token: string): string
+    /** Split ordered draft ids by kind (the machine tracks ids only; the registry owns kind). */
+    partition(ids: readonly DraftAttachmentId[]): {
+      readonly images: readonly DraftAttachmentId[]
+      readonly files: readonly DraftAttachmentId[]
+    }
   }
 }
 
@@ -381,12 +388,20 @@ export class SessionInputShell implements SessionInput {
     }
     // Claimed pre-gate: a claim that does not declare image acceptance never
     // submits while images are attached — one notice, everything retained.
-    // Enter-time adjudication applies the same policy for unclaimed lines
-    // inside the command source itself.
+    // Plain file attachments are never command payload, so any claim rejects
+    // them outright. Enter-time adjudication applies the same policy for
+    // unclaimed lines inside the command source itself.
     const before = this.snapshot
-    if (before.phase === 'claimed' && this.imageIds.length > 0 && before.claim?.images !== true) {
-      this.notify('error', this.deps.commandImages.unsupportedNotice(before.claim?.token ?? before.draft))
-      return
+    if (before.phase === 'claimed' && this.imageIds.length > 0) {
+      const partitioned = this.deps.commandImages.partition(this.imageIds)
+      if (partitioned.files.length > 0) {
+        this.notify('error', this.deps.commandImages.filesUnsupportedNotice(before.claim?.token ?? before.draft))
+        return
+      }
+      if (before.claim?.images !== true) {
+        this.notify('error', this.deps.commandImages.unsupportedNotice(before.claim?.token ?? before.draft))
+        return
+      }
     }
     this.dispatchRun(({ type: 'enter', mode, draft: this.projection.clipboardText }))
     const phase = this.snapshot.phase
@@ -839,7 +854,11 @@ export class SessionInputShell implements SessionInput {
       this.dispatchRun(({ type: 'adjudicated', attempt, outcome: undefined }))
       return
     }
-    inputTriggers.adjudicate(draft.trim(), attempt.signal, { images: this.imageIds.length }).then(
+    const partitioned = this.deps.commandImages.partition(this.imageIds)
+    inputTriggers.adjudicate(draft.trim(), attempt.signal, {
+      images: partitioned.images.length,
+      files: partitioned.files.length,
+    }).then(
       (outcome: PickOutcome) => {
         if (this.dead(attempt)) return
         this.dispatchRun(({ type: 'adjudicated', attempt, outcome }))
@@ -860,7 +879,11 @@ export class SessionInputShell implements SessionInput {
    * for correction.
    */
   private beginSubmit(attempt: SubmitAttempt, claim: CommandClaim, args: string): void {
-    const imageIds = claim.images === true ? [...this.imageIds] : []
+    // Commands consume image payloads only; plain file attachments never ride
+    // a claim (the claimed pre-gate refuses them before this transaction).
+    const imageIds = claim.images === true
+      ? [...this.deps.commandImages.partition(this.imageIds).images]
+      : []
     Promise.resolve()
       .then(async () => {
         const images = imageIds.length > 0 ? await this.deps.commandImages.serialize(imageIds) : []

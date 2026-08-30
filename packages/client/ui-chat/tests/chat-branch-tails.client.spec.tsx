@@ -796,12 +796,14 @@ describe('MessageItem arms', () => {
         summaryEventSeq: 4,
         shadowedItemCount: 16,
         shadowedTokenCount: 11_309,
+        summaryUsage: { inputTokens: 10, cacheReadTokens: 90, cacheWriteTokens: 5 },
       }}
       />,
     )
     const row = view.getByRole('button', { name: /上下文已压缩/ })
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(view.getByText('已压缩 16 条历史记录（约 11309 tokens）')).toBeTruthy()
+    expect(view.getByText('摘要缓存命中 86%（读取 90 tok）')).toBeTruthy()
     expect(view.queryByText(/保留的事实/)).toBeNull()
     fireEvent.click(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')

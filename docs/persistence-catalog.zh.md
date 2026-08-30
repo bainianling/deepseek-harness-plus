@@ -465,6 +465,24 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-protocol/src/types.ts)
 
+### `jailbreak/*`
+
+<a id="jailbreakmode--log-only"></a>
+
+#### `jailbreak/mode` — log-only
+
+```ts persistence-catalog
+/**
+ * Whether jailbreak mode is in force from this point on, with the strategy
+ * selected for that state: log-only, non-surface, whole-value replace. The
+ * last `jailbreak/mode` wins; a log with none folds to inactive through
+ * {@link foldJailbreakMode}.
+ */
+'jailbreak/mode': { active: boolean; strategy: string }
+```
+
+来源：[`packages/jailbreak/jailbreak-mode/src/index.ts:54`](../packages/jailbreak/jailbreak-mode/src/index.ts)
+
 ### `llm/*`
 
 <a id="llmretry--log-only"></a>

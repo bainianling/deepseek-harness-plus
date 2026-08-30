@@ -27,6 +27,9 @@
       "path": "../ui-primitives"
     },
     {
+      "path": "../ui-attachment"
+    },
+    {
       "path": "../ui-renderer"
     },
     {

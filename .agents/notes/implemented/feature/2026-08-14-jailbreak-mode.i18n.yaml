@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-jailbreak-mode.md
+2026-08-14-jailbreak-mode.md: 814f7a34601e1c1817f0e2b5d810e8a28f152968
+2026-08-14-jailbreak-mode.zh.md: 5bc269d5347fb03f99311b6279d52c311b7160ce

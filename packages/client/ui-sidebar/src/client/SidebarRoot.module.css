@@ -65,6 +65,7 @@
    render stays static. */
 .railIn .iconButton,
 .railIn .newSession,
+.railIn .automationButton,
 .railIn .regionArea {
   animation: rail-in 150ms var(--ds-ease-in-out) backwards;
 }
@@ -189,6 +190,9 @@
   background: transparent;
   cursor: pointer;
   color: var(--dsw-alias-label-secondary);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .iconButton:hover {
@@ -264,6 +268,9 @@
   line-height: 22px;
   cursor: pointer;
   overflow: hidden;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .newSession:hover {
@@ -292,6 +299,65 @@
 }
 
 .collapsed .newSessionLabel {
+  max-width: 0;
+}
+
+/* Automation button: same geometry as New Session but with secondary visual
+   weight (dashed border, muted fill) to distinguish the scheduling entry
+   from the primary conversation action. */
+.automationButton {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 6px 14px;
+  margin: 0 2px 8px;
+  box-sizing: border-box;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.automationButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.collapsed .automationButton {
+  align-self: flex-start;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0 0 12px;
+  gap: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.collapsed .automationButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.automationLabel {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.collapsed .automationLabel {
   max-width: 0;
 }
 
@@ -332,6 +398,7 @@
 
 .footerActions {
   display: flex;
+  flex-direction: column;
 }
 
 .collapsed .footArea {
@@ -345,11 +412,25 @@
   width: auto;
 }
 
+/* Wallpaper import seat directly under the brand row (wide only). */
+.wallpaperRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 2px 8px;
+}
+
+.wallpaperRow button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide,
   .fading > *,
   .railIn .iconButton,
   .railIn .newSession,
+  .railIn .automationButton,
   .railIn .footArea,
   .railIn .regionArea {
     transition: none;

@@ -133,6 +133,7 @@ export class WebServer extends Service {
   private readonly exact = new Map<string, WebRoute>()
   private readonly prefixes = new Map<string, WebRoute>()
   private readonly upgrades = new Map<string, WebUpgradeRoute>()
+  private readonly guards: ((req: IncomingMessage) => boolean)[] = []
   private readonly upgradedSockets = new Set<Duplex>()
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
@@ -169,6 +170,21 @@ export class WebServer extends Service {
     }
     table.set(route.path, route)
     return () => { table.delete(route.path) }
+  }
+
+  /**
+   * Register a request guard before every route and fallback. A guard denying
+   * the request receives no application response, so a long-lived listener can
+   * withdraw LAN access without restarting its socket.
+   * @param guard - returns true only when this request may reach the route table.
+   * @returns the disposer removing the guard.
+   */
+  guard(guard: (req: IncomingMessage) => boolean): () => void {
+    this.guards.push(guard)
+    return () => {
+      const at = this.guards.indexOf(guard)
+      if (at !== -1) this.guards.splice(at, 1)
+    }
   }
 
   /**
@@ -219,6 +235,12 @@ export class WebServer extends Service {
   /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
   async [Service.init](): Promise<void> {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      for (const guard of this.guards) {
+        if (guard(req)) continue
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
       /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
       requests; the field is only optional on the client-side IncomingMessage type */
       const rawPath = new URL(req.url ?? '/', 'http://x').pathname
@@ -273,7 +295,7 @@ export class WebServer extends Service {
         socket.destroy()
         return
       }
-      if (route === undefined) {
+      if (route === undefined || this.guards.some(guard => !guard(req))) {
         socket.destroy()
         return
       }

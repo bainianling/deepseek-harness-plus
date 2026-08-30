@@ -78,13 +78,15 @@ export function ComposerAttachments({
     }
   }, [canAcceptDrop, onAddImages])
 
-  const railItems = useMemo<ComposerRailItem[]>(() => attachments.map(attachment => ({
-    id: attachment.id,
-    previewUrl: attachment.previewUrl,
-    alt: attachment.file.name || t('image.pending'),
-    removeLabel: t('image.remove', { name: attachment.file.name }),
-    attachment,
-  })), [attachments, t])
+  const railItems = useMemo<ComposerRailItem[]>(() => attachments
+    .filter(attachment => attachment.kind === 'image')
+    .map(attachment => ({
+      id: attachment.id,
+      previewUrl: attachment.previewUrl,
+      alt: attachment.file.name || t('image.pending'),
+      removeLabel: t('image.remove', { name: attachment.file.name }),
+      attachment,
+    })), [attachments, t])
 
   return (
     <>
@@ -95,7 +97,10 @@ export function ComposerAttachments({
         />
       )}
       {railItems.length > 0 && (
-        <div className={css.rail}>
+        <div className={css.composerAttachments}>
+          <div className={css.summary} role="status">
+            {t('image.added', { count: railItems.length })}
+          </div>
           <AttachmentRail
             items={railItems}
             labels={attachmentRailLabels(t)}

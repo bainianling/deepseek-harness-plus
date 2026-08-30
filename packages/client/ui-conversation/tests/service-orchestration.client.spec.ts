@@ -9,7 +9,7 @@ import { makeTranslate, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-run
 import type { QueuedMessage } from '@deepseek-ai/dsh-api-session-controller/client'
 import { ComposerBlockRegistry } from '../src/client/input/blocks.ts'
 import { InputHub } from '../src/client/input/hub.ts'
-import { ConversationController, UnsupportedImageMediaTypeError } from '../src/client/service.ts'
+import { ConversationController } from '../src/client/service.ts'
 import { zh } from '../src/client/locales.ts'
 
 async function bench() {
@@ -87,7 +87,7 @@ describe('ConversationController', () => {
     const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:draft-1')
     const revoked = vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
     try {
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([new Uint8Array(4)], 'a.png', { type: 'image/png' }),
       ])
       if (attachment === undefined) throw new Error('draft attachment missing')
@@ -107,7 +107,7 @@ describe('ConversationController', () => {
     const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:detached')
     const revoked = vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
     try {
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([Uint8Array.of(1)], 'detached.png', { type: 'image/png' }),
       ])
       if (attachment === undefined) throw new Error('draft attachment missing')
@@ -124,15 +124,22 @@ describe('ConversationController', () => {
     await b.runtime.dispose()
   })
 
-  it('validates every MIME type before allocating previews', async () => {
+  it('routes image MIME types to previews and every other file to a plain file attachment', async () => {
     const b = await bench()
     const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
-    expect(() => b.root.createDraftImages([
-      new File([Uint8Array.of(1)], 'valid.png', { type: 'image/png' }),
-      new File([Uint8Array.of(2)], 'invalid.svg', { type: 'image/svg+xml' }),
-    ])).toThrow(UnsupportedImageMediaTypeError)
-    expect(created).not.toHaveBeenCalled()
-    created.mockRestore()
+    try {
+      const [image, file] = b.root.createDraftAttachments([
+        new File([Uint8Array.of(1)], 'valid.png', { type: 'image/png' }),
+        new File([Uint8Array.of(2)], 'notes.svg', { type: 'image/svg+xml' }),
+      ])
+      expect(image?.kind).toBe('image')
+      expect(image?.previewUrl).toBe('blob:preview')
+      expect(file?.kind).toBe('file')
+      expect(file?.previewUrl).toBe('')
+      expect(created).toHaveBeenCalledTimes(1)
+    } finally {
+      created.mockRestore()
+    }
     await b.runtime.dispose()
   })
 
@@ -178,7 +185,7 @@ describe('sendSession submission echo', () => {
   it('registers the echo before serialization and prompts with its identity', async () => {
     const b = await echoBench()
     try {
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([Uint8Array.of(1, 2, 3)], 'a.png', { type: 'image/png' }),
       ])
       const session = b.runtime.sessions.binding('s1')!.session
@@ -217,7 +224,7 @@ describe('sendSession submission echo', () => {
       const seedImageUrl = vi.fn(() => true)
       b.runtime.ctx.provide('uiConversation')
       b.runtime.ctx.set('uiConversation', { seedImageUrl })
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([Uint8Array.of(9)], 'seeded.png', { type: 'image/png' }),
       ])
       const session = b.runtime.sessions.binding('s1')!.session
@@ -243,7 +250,7 @@ describe('sendSession submission echo', () => {
       b.prompt.mockResolvedValueOnce({
         ok: false, error: { code: 'attachment-error', message: 'nope', details: {} },
       } as never)
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([Uint8Array.of(7)], 'kept.png', { type: 'image/png' }),
       ])
       const session = b.runtime.sessions.binding('s1')!.session
@@ -270,7 +277,7 @@ describe('sendSession submission echo', () => {
     }
     vi.stubGlobal('FileReader', FailingReader)
     try {
-      const [attachment] = b.root.createDraftImages([
+      const [attachment] = b.root.createDraftAttachments([
         new File([Uint8Array.of(1)], 'broken.png', { type: 'image/png' }),
       ])
       const session = b.runtime.sessions.binding('s1')!.session
@@ -350,12 +357,12 @@ describe('draft image dimension probe', () => {
     }
     vi.stubGlobal('Image', InstantImage)
     try {
-      const [probed] = b.root.createDraftImages([
+      const [probed] = b.root.createDraftAttachments([
         new File([Uint8Array.of(1)], 'probed.png', { type: 'image/png' }),
       ])
       expect(probed).toMatchObject({ width: 640, height: 480 })
       vi.stubGlobal('Image', undefined)
-      const [unprobed] = b.root.createDraftImages([
+      const [unprobed] = b.root.createDraftAttachments([
         new File([Uint8Array.of(2)], 'unprobed.png', { type: 'image/png' }),
       ])
       expect(unprobed?.width).toBeUndefined()

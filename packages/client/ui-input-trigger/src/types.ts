@@ -97,6 +97,8 @@ export interface HeaderRequest {
 export interface SubmitEnvelope {
   /** Number of image attachments accompanying the draft. */
   readonly images: number
+  /** Number of plain file attachments accompanying the draft. */
+  readonly files?: number
 }
 
 /** Candidate request passed to a source. The signal is superseded on query change / menu close. */

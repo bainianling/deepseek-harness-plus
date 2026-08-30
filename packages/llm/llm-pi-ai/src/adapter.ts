@@ -26,6 +26,7 @@
  * @module dsh-llm-pi-ai/adapter
  */
 
+import { createHash } from 'node:crypto'
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type {
   Api,
@@ -211,6 +212,29 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
   }
 }
 
+/** Stable JSON serialization for cache-routing inputs; arrays retain their model-visible order. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (typeof value !== 'object' || value === null) return JSON.stringify(value)
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`
+}
+
+/**
+ * Route equivalent OpenAI prompt prefixes to one bounded key without conflating
+ * that cache partition with the provider's real per-session transport identity.
+ */
+function promptCacheKey(model: Model<Api>, context: Awaited<ReturnType<typeof toPiContext>>): string {
+  const prefix = canonicalJson({
+    api: model.api,
+    baseURL: model.baseUrl,
+    provider: model.provider,
+    model: model.id,
+    system: context.systemPrompt ?? '',
+    tools: context.tools ?? [],
+  })
+  return `dsh-${createHash('sha256').update(prefix).digest('hex').slice(0, 32)}`
+}
+
 /**
  * pi-ai-backed multi-provider adapter. Each operation reads the current
  * profiles, so a configuration change reaches the next request without a
@@ -381,6 +405,15 @@ export class PiAiAdapter extends LlmAdapter {
         // Profile headers are deployment-owned; attribution names are
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
+        // pi-ai keeps the real session id in transport metadata. Route only a
+        // cache-enabled OpenAI payload by its deterministic static prefix so
+        // equivalent sessions can share a provider-side prompt cache.
+        onPayload: (payload) => {
+          if (typeof payload !== 'object' || payload === null || !Object.hasOwn(payload, 'prompt_cache_key')) return payload
+          const request = payload as Record<string, unknown>
+          if (request.prompt_cache_key === undefined) return payload
+          return { ...request, prompt_cache_key: promptCacheKey(model, context) }
+        },
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
       let exhausted = false

@@ -23,14 +23,22 @@
 
 .item {
   position: relative;
-  flex: 0 0 64px;
-  width: 64px;
-  height: 64px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 132px) 24px;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 min(240px, 72%);
+  min-width: 0;
+  height: 48px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .thumbnail {
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
@@ -46,41 +54,39 @@
   object-fit: cover;
 }
 
-.remove {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
+.name {
+  min-width: 0;
   padding: 0;
   border: none;
-  border-radius: 50%;
-  background: var(--dsw-alias-button-contrast-fill);
-  color: var(--dsw-alias-label-primary-inverted);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.remove {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease-in-out;
 }
 
-.item:hover .remove,
+.remove:hover,
 .remove:focus-visible {
-  opacity: 1;
-}
-
-/* Touch surfaces have no hover to reveal the control. */
-@media (pointer: coarse) {
-  .remove {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .remove {
-    transition: none;
-  }
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
 }
 
 .arrow {

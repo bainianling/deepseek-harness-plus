@@ -15,6 +15,8 @@ const commandImages = {
   serialize: () => Promise.resolve([]),
   release: () => {},
   unsupportedNotice: (token: string) => `${token.trim()} images-unsupported`,
+  filesUnsupportedNotice: (token: string) => `${token.trim()} files-unsupported`,
+  partition: (ids: readonly DraftAttachmentId[]) => ({ images: [...ids], files: [] }),
 }
 
 function chip(shell: SessionInputShell): void {

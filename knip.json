@@ -94,6 +94,16 @@
         "tests/**/*.tsx"
       ]
     },
+    "packages/client/ui-jailbreak": {
+      "entry": [
+        "tests/**/*.spec.tsx"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tests/**/*.tsx"
+      ]
+    },
     "packages/client/ui-conversation": {
       "entry": [
         "tests/**/*.spec.{ts,tsx}",

@@ -44,6 +44,10 @@ interface ConversationAttachmentFace {
   ): Promise<SubmitOutcome>
   serializeDraftImages(imageIds: readonly DraftAttachmentId[]): Promise<readonly SubmitImageAttachment[]>
   releaseDraftImage(id: DraftAttachmentId): void
+  partitionDraftIds(ids: readonly DraftAttachmentId[]): {
+    readonly images: readonly DraftAttachmentId[]
+    readonly files: readonly DraftAttachmentId[]
+  }
 }
 
 /** Session-addressed input facade registry (SessionInputResolver face + composer-layer extras). */
@@ -103,6 +107,15 @@ export class InputHub implements SessionInputResolver {
         unsupportedNotice: token => this.t('command.imagesUnsupported', {
           command: token.trim().replace(/^\//u, ''),
         }),
+        filesUnsupportedNotice: token => this.t('command.filesUnsupported', {
+          command: token.trim().replace(/^\//u, ''),
+        }),
+        partition: (ids) => {
+          const conversation = this.rootCtx.get('conversation') as ConversationAttachmentFace | undefined
+          return conversation === undefined
+            ? { images: [...ids], files: [] }
+            : conversation.partitionDraftIds(ids)
+        },
       },
     })
     this.shells.set(id, shell)

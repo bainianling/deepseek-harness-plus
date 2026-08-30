@@ -118,7 +118,7 @@ function bench(over?: BenchOptions) {
   const shell = new SessionInputShell({
     actx: SCTX,
     defaultSink: sink,
-    commandImages: { serialize: () => Promise.resolve([]), release: () => {}, unsupportedNotice: (token: string) => `${token.trim()} images-unsupported` },
+    commandImages: { serialize: () => Promise.resolve([]), release: () => {}, unsupportedNotice: (token: string) => `${token.trim()} images-unsupported`, filesUnsupportedNotice: (token: string) => `${token.trim()} files-unsupported`, partition: ids => ({ images: [...ids], files: [] }) },
     queue: {
       getSnapshot: () => session.getSnapshot().queue,
       subscribe: fn => session.subscribe(fn),
@@ -1284,7 +1284,7 @@ describe('command launcher chrome and control seats', () => {
     // Every seat dispatched, nothing rendered (render passes may repeat; the
     // seat set is the contract).
     expect([...new Set(slotCalls.map(c => c.key))]).toEqual([
-      'conversation.input.attachments', 'conversation.input.plan', 'conversation.input.model',
+      'conversation.input.attachments', 'conversation.input.image-import', 'conversation.input.plan', 'conversation.input.jailbreak', 'conversation.input.model',
     ])
     expect(view.queryByLabelText('Plan mode')).toBeNull()
     expect(view.queryByLabelText('Model')).toBeNull()
@@ -1431,12 +1431,14 @@ describe('command launcher chrome and control seats', () => {
     expect(view.getByTestId('plan-entry')).toBeTruthy()
     expect(view.getByTestId('model-entry')).toBeTruthy()
     // The bar hands its chrome disable state to the filling entry.
-    const controls = slotCalls.filter(call => call.key !== 'conversation.input.attachments')
+    const controls = slotCalls.filter(call => call.key === 'conversation.input.plan'
+      || call.key === 'conversation.input.jailbreak' || call.key === 'conversation.input.model')
     expect(controls.every(c => (c.owner as { locked: boolean }).locked)).toBe(true)
     expect(attachmentOwner(slotCalls).canAcceptDrop).toBe(false)
     cleanup()
     const live = bench({ running: true })
-    const liveControls = live.slotCalls.filter(call => call.key !== 'conversation.input.attachments')
+    const liveControls = live.slotCalls.filter(call => call.key === 'conversation.input.plan'
+      || call.key === 'conversation.input.jailbreak' || call.key === 'conversation.input.model')
     expect(liveControls.every(c => !(c.owner as { locked: boolean }).locked)).toBe(true)
     expect(attachmentOwner(live.slotCalls).canAcceptDrop).toBe(true)
   })

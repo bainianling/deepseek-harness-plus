@@ -9,8 +9,11 @@ import type {
   WorkspaceBaseline,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceDeleteValue,
   WorkspaceInsertSessionBeforeRequest,
+  WorkspaceMoveSessionRequest,
   WorkspaceOrderValue,
   WorkspaceValue,
   WorkspaceId,
@@ -181,6 +184,41 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     const result = await this.remote.archiveSession({ sessionId })
     if (result.ok) this.installArchived(result.value.archivedSessionIds)
     return result
+  }
+
+  /**
+   * Move a Session into another Workspace and merge the returned target row.
+   * The source Workspace refreshes through its own follow increment.
+   * @param workspaceId - adopting Workspace.
+   * @param sessionId - Session to move.
+   * @param beforeSessionId - target-accounted anchor; omitted appends.
+   * @returns generated Remote result.
+   */
+  async moveSession(
+    workspaceId: WorkspaceMoveSessionRequest['workspaceId'],
+    sessionId: WorkspaceMoveSessionRequest['sessionId'],
+    beforeSessionId?: WorkspaceMoveSessionRequest['beforeSessionId'],
+  ): Promise<RemoteResult<WorkspaceValue>> {
+    const result = await this.remote.moveSession({
+      workspaceId,
+      sessionId,
+      ...beforeSessionId === undefined ? {} : { beforeSessionId },
+    })
+    if (result.ok) this.upsert(result.value.workspace)
+    return result
+  }
+
+  /**
+   * Durably delete a Session; the local projection refreshes through follow
+   * increments (each affected Workspace row and the archive set), never the
+   * unary echo.
+   * @param sessionId - Session to delete.
+   * @returns generated Remote result.
+   */
+  async deleteSession(
+    sessionId: WorkspaceDeleteSessionRequest['sessionId'],
+  ): Promise<RemoteResult<WorkspaceDeleteSessionValue>> {
+    return await this.remote.deleteSession({ sessionId })
   }
 
   /**

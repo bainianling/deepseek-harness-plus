@@ -16,12 +16,18 @@ const workspaceId = z.string().transform(value => value as WorkspaceId)
 /**
  * Durable shape of one workspace record. `path` is the `fs.realpath` canon
  * stamped at create; `sessionIds` is the ordered ownership account (array
- * order is display order); timestamps are ISO-8601 strings.
+ * order is display order); `adoptedSessionIds` names account members placed
+ * by an explicit move rather than derived from their header cwd — they stay
+ * accounted even though their canonical cwd names a different workspace, and
+ * are pruned only like every other candidate (header gone). Defaulted so
+ * records written before the field parse unchanged. Timestamps are ISO-8601
+ * strings.
  */
 export const workspaceRecord = z.object({
   path: z.string(),
   title: z.string(),
   sessionIds: z.array(z.string().transform(SessionId)),
+  adoptedSessionIds: z.array(z.string().transform(SessionId)).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

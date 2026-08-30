@@ -3,6 +3,7 @@
 /** Locale keys these surfaces render. */
 export type AgentPresetSettingsKey =
   | 'title' | 'description' | 'loading' | 'error' | 'userTrust' | 'seatHint' | 'headerHint'
+  | 'headerDefault' | 'switchLockedHint'
   | 'nav' | 'sectionIntro' | 'builtIn' | 'setDefault' | 'view'
   | 'presetStandardName' | 'presetStandardDescription'
   | 'presetPtcName' | 'presetPtcDescription'
@@ -21,12 +22,16 @@ export type AgentPresetSettingsKey =
 /** English copy. */
 export const en: Record<AgentPresetSettingsKey, string> = {
   title: 'Agent preset',
-  description: 'Applies to sessions you start from now on. Running sessions keep the preset they began with.',
+  description:
+    'Applies to sessions you start from now on. You can also switch a session\'s preset any time '
+    + 'from its header chip — only a turn that is currently running holds the swap.',
   loading: 'Loading presets…',
   error: 'Could not load agent presets.',
   userTrust: 'Custom',
   seatHint: 'Agent preset for the session you are about to start',
-  headerHint: 'The agent preset this session runs, fixed when it started',
+  headerHint: 'The agent preset this session runs; pick another to switch between turns',
+  headerDefault: 'Default',
+  switchLockedHint: 'Switching unlocks once the running turn finishes',
   nav: 'Agent presets',
   sectionIntro:
     'A preset is the plugin composition one session\'s agent runs — its tools, prompt, and capabilities. '
@@ -88,12 +93,14 @@ export const en: Record<AgentPresetSettingsKey, string> = {
 /** Simplified Chinese copy. */
 export const zh: Record<AgentPresetSettingsKey, string> = {
   title: 'Agent 预设',
-  description: '对此后新建的会话生效。运行中的会话保持它开始时的预设。',
+  description: '对此后新建的会话生效；也可以随时在会话头部的预设标签上更换——只有正在运行的轮次会暂时锁定切换。',
   loading: '正在加载预设…',
   error: '无法加载 Agent 预设。',
   userTrust: '自定义',
   seatHint: '即将开始的这个会话所用的 Agent 预设',
-  headerHint: '本会话运行的 Agent 预设，开始时即固定',
+  headerHint: '本会话当前运行的 Agent 预设，点击可随时更换',
+  headerDefault: '默认',
+  switchLockedHint: '当前轮次结束后即可更换',
   nav: 'Agent 预设',
   sectionIntro: '预设即一个会话的 Agent 所运行的插件组装 —— 它的工具、提示词与能力。复制一份既有预设改成自己的，或用「创造模式」让 Agent 帮你创建。',
   builtIn: '内置',

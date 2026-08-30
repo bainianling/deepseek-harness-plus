@@ -76,6 +76,27 @@ export type PromptContentPart =
     readonly data: string
     readonly name?: string
   }
+  | {
+    /**
+     * One arbitrary file upload: the Host writes the bytes into the Session
+     * workspace's `.dsh/uploads` directory and admits an `@path` workspace
+     * reference in the user message instead of model content.
+     */
+    readonly type: 'file'
+    /** Browser file name; the Host sanitizes it before writing. */
+    readonly name: string
+    /** Base64-encoded file bytes. */
+    readonly data: string
+  }
+
+/** Default maximum files accepted in one prompt. */
+export const DEFAULT_MAX_FILES_PER_MESSAGE = 20
+/** Default maximum decoded size of one uploaded file. */
+export const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
+/** Default maximum combined decoded size of one prompt's file uploads. */
+export const DEFAULT_MAX_MESSAGE_FILE_BYTES = 200 * 1024 * 1024
+/** Workspace-relative directory receiving prompt file uploads. */
+export const PROMPT_FILE_UPLOAD_DIR = '.dsh/uploads'
 
 /** Complete model selection for one Session. */
 export interface ModelSelection {
@@ -360,6 +381,102 @@ export interface SessionCancelRequest {
 /** Receipt after cancellation is admitted to the live Agent. */
 export interface SessionCancelValue {
   readonly accepted: true
+}
+
+/** Signals accepted by the Session-addressed terminal surface. */
+export type SessionTerminalSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'SIGTSTP' | 'SIGHUP'
+
+/** Browser-safe top-level shell status. */
+export type SessionTerminalStatus =
+  | { readonly kind: 'running' }
+  | { readonly kind: 'exited'; readonly exitCode: number | null; readonly signal: string | null }
+
+/** Browser-safe summary of one Agent-owned PTY. */
+export interface SessionTerminalSnapshot {
+  readonly sessionId: string
+  readonly name?: string
+  readonly type: string
+  readonly pid?: number
+  readonly status: SessionTerminalStatus
+  readonly busy: boolean
+}
+
+/** List the PTYs owned by one Session Agent. */
+export interface SessionTerminalListRequest {
+  readonly sessionId: SessionId
+}
+
+/** Current PTYs owned by one Session Agent. */
+export interface SessionTerminalListValue {
+  readonly sessions: readonly SessionTerminalSnapshot[]
+}
+
+/** Create one shell PTY rooted at the Session workspace. */
+export interface SessionTerminalOpenRequest {
+  readonly sessionId: SessionId
+  readonly name?: string
+}
+
+/** Published shell PTY and bounded startup text. */
+export interface SessionTerminalOpenValue extends SessionTerminalSnapshot {
+  readonly motd: string
+}
+
+/** Send text to one Session-owned PTY. */
+export interface SessionTerminalSendRequest {
+  readonly sessionId: SessionId
+  readonly terminalSessionId: string
+  readonly text: string
+  readonly submit?: boolean
+}
+
+/** Why one terminal send returned control. */
+export type SessionTerminalWaitReason = 'stdin_read' | 'inferred_idle' | 'timeout' | 'session_exit'
+
+/** Receipt after terminal input is accepted by the exclusive send operation. */
+export interface SessionTerminalSendValue {
+  readonly accepted: true
+}
+
+/** Read a newest-relative scrollback page. */
+export interface SessionTerminalReadRequest {
+  readonly sessionId: SessionId
+  readonly terminalSessionId: string
+  readonly offset?: number
+  readonly count?: number
+}
+
+/** One retained scrollback page. */
+export interface SessionTerminalReadValue {
+  readonly text: string
+  readonly totalLines: number
+  readonly lineBegin: number
+  readonly lineEnd: number
+  readonly truncated: boolean
+}
+
+/** Deliver one signal to a PTY foreground process group. */
+export interface SessionTerminalSignalRequest {
+  readonly sessionId: SessionId
+  readonly terminalSessionId: string
+  readonly signal: SessionTerminalSignal
+}
+
+/** Signal delivery receipt. */
+export interface SessionTerminalSignalValue {
+  readonly delivered: true
+  readonly targetPgid: number
+}
+
+/** Close one PTY and await owned process-tree quiescence. */
+export interface SessionTerminalCloseRequest {
+  readonly sessionId: SessionId
+  readonly terminalSessionId: string
+}
+
+/** PTY close receipt. */
+export interface SessionTerminalCloseValue {
+  readonly closed: boolean
 }
 
 /** Request to open one path prepared by a Session-aware caller on the Host desktop. */

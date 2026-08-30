@@ -797,13 +797,22 @@ export class SessionManager {
 
   /**
    * Repair one re-established Host-event generation with queryable baselines.
-   * Opened Session follow streams resume independently through API Gateway.
+   * Opened Session follow streams resume independently through API Gateway;
+   * the persisted selection additionally reopens its Session so the visible
+   * conversation resumes live updates when it points at a cold instance.
    */
   handleConnected(): void {
     void this.refreshList()
-    const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
+    const selected = this.selected
+    const selectedAddress = selected === undefined ? undefined : this.addresses.get(selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
-    if (this.selected !== undefined) void this.refreshSubagents(this.selected)
+    if (selected !== undefined) {
+      void this.refreshSubagents(selected)
+      // A host restart leaves a persisted selection pointing at a cold Session
+      // object. Reopen only that visible conversation; all other sessions retain
+      // the lazy history-loading behavior.
+      void this.get(selected).open()
+    }
     for (const parentSessionId of this.openCatalogs) void this.refreshSubagents(parentSessionId)
   }
 

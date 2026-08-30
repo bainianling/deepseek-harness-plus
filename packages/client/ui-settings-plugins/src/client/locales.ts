@@ -11,6 +11,9 @@ export type PluginsSettingsLocaleKey =
   | 'webSearchTitle' | 'webSearchDescription'
   | 'webSearchApiKey' | 'webSearchApiKeyHint' | 'webSearchApiKeySet' | 'webSearchApiKeyUnset'
   | 'webSearchBaseUrl' | 'webSearchBaseUrlHint' | 'webSearchMaxUses' | 'webSearchMaxUsesHint'
+  | 'compactionTitle' | 'compactionDescription'
+  | 'compactionThresholdTokens' | 'compactionThresholdTokensHint'
+  | 'compactionRetainTokens' | 'compactionRetainTokensHint'
   | 'subagentModelSelectionTitle' | 'subagentModelSelectionDescription'
   | 'subagentModelSelectionToggle' | 'subagentModelSelectionChoose' | 'subagentModelSelectionAllowed'
   | 'subagentModelSelectionLoading' | 'subagentModelSelectionLoadFailed' | 'subagentModelSelectionRetry'
@@ -57,6 +60,12 @@ export const en: Record<PluginsSettingsLocaleKey, string> = {
   webSearchBaseUrlHint: 'Leave blank to use the provider default.',
   webSearchMaxUses: 'Max searches per request',
   webSearchMaxUsesHint: 'How many times one request may search before it must answer.',
+  compactionTitle: 'Context compaction',
+  compactionDescription: 'When long conversations are condensed into a summary checkpoint.',
+  compactionThresholdTokens: 'Compact at (tokens)',
+  compactionThresholdTokensHint: 'Compact the context once it reaches this length. Leave blank to compact at a fraction of the model context window.',
+  compactionRetainTokens: 'Keep recent (tokens)',
+  compactionRetainTokensHint: 'Recent conversation kept verbatim after a compaction. Leave blank to keep a fraction of the model context window.',
   subagentModelSelectionTitle: 'Subagent',
   subagentModelSelectionDescription: 'Control which models agents may choose for subagents.',
   subagentModelSelectionToggle: 'Allow agents to choose models for subagents',
@@ -113,6 +122,12 @@ export const zh: Record<PluginsSettingsLocaleKey, string> = {
   webSearchBaseUrlHint: '留空则使用提供方默认地址。',
   webSearchMaxUses: '单次请求最多搜索次数',
   webSearchMaxUsesHint: '一次请求在必须作答前最多可以搜索多少次。',
+  compactionTitle: '上下文压缩',
+  compactionDescription: '长对话何时被压缩为摘要检查点。',
+  compactionThresholdTokens: '压缩触发长度（tokens）',
+  compactionThresholdTokensHint: '上下文达到该长度即自动压缩。留空则按模型上下文窗口的比例触发。',
+  compactionRetainTokens: '保留近期内容（tokens）',
+  compactionRetainTokensHint: '压缩后逐字保留的近期对话长度。留空则按模型上下文窗口的比例保留。',
   subagentModelSelectionTitle: 'Subagent',
   subagentModelSelectionDescription: '控制 Agent 为 Subagent 选择模型的权限。',
   subagentModelSelectionToggle: '允许 Agent 为 Subagent 选择模型',

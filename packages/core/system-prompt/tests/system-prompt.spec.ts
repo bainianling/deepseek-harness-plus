@@ -119,6 +119,21 @@ describe('SystemPrompt', () => {
     }
   })
 
+  it('breaks equal section and context orders by name for a stable rendered prefix', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    ctx.systemPrompt.section({ name: 'zulu', order: 10, text: 'zulu section' })
+    ctx.systemPrompt.section({ name: 'alpha', order: 10, text: 'alpha section' })
+    ctx.systemPrompt.context({ name: 'zulu', order: 10, text: 'zulu context' })
+    ctx.systemPrompt.context({ name: 'alpha', order: 10, text: 'alpha context' })
+
+    const assembly = await ctx.systemPrompt.assemble()
+    expect(contributed(assembly).map(section => section.name)).toEqual(['alpha', 'zulu'])
+    expect(assembly.contexts.map(context => context.name)).toEqual(['alpha', 'zulu'])
+    expect(renderPrompt(assembly)).toContain('alpha section\n\nzulu section')
+    expect(renderContextSnapshot(assembly)).toContain('alpha context\n\nzulu context')
+  })
+
   it('resolves section text providers against the assemble context, at each assemble call', async () => {
     // The context is HOW per-agent sections work (the loop passes { agent });
     // this spec stays agent-agnostic and smuggles a marker through a plain field.

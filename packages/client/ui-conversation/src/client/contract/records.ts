@@ -4,7 +4,7 @@
 
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
+import type { ContentBlock, TokenUsage } from '@deepseek-ai/dsh-llm/types'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { LlmRetryEventData } from '@deepseek-ai/dsh-llm-retry/types'
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo/client'
@@ -194,6 +194,8 @@ export interface CompactionSummaryNode {
   shadowedItemCount: number | null
   /** Estimated token price of the replaced items, or null when the summary event is unavailable or malformed. */
   shadowedTokenCount: number | null
+  /** Provider accounting from the summary request, when the cited event reports valid usage. */
+  summaryUsage?: Pick<TokenUsage, 'inputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>
 }
 
 /**

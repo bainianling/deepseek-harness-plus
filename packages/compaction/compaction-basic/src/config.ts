@@ -14,6 +14,7 @@ import type {
   ResolvedConfig,
   ResolvedRetention,
   ResolvedTargetPolicy,
+  ResolvedThreshold,
 } from './types.ts'
 
 /** Default request-pressure fraction for every routed model. */
@@ -25,6 +26,7 @@ const DEFAULT_RETAIN_RATIO = 0.16
 /** Fields shared by top-level defaults and exact-target overrides. */
 const POLICY_CONFIG_KEYS = [
   'thresholdRatio',
+  'thresholdTokens',
   'retainRatio',
   'retainTokens',
   'summarizationProvider',
@@ -71,20 +73,20 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
     throw new Error('BasicCompactionConfig: auto must be a boolean')
   }
 
-  const thresholdRatio = config.thresholdRatio ?? DEFAULT_THRESHOLD_RATIO
+  const threshold = resolveThreshold(config, { thresholdRatio: DEFAULT_THRESHOLD_RATIO })
   const retention = resolveRetention(config, { retainRatio: DEFAULT_RETAIN_RATIO })
-  validateRatioRetention(thresholdRatio, retention, 'BasicCompactionConfig')
+  validateRatioRetention(threshold, retention, 'BasicCompactionConfig')
   const modelPolicies = resolveModelPolicies(config.modelPolicies)
   for (const [index, policy] of modelPolicies.entries()) {
     validateRatioRetention(
-      policy.thresholdRatio ?? thresholdRatio,
+      resolveThreshold(policy, threshold),
       resolveRetention(policy, retention),
       `BasicCompactionConfig: modelPolicies[${index}]`,
     )
   }
 
   return deepFreeze({
-    thresholdRatio,
+    ...threshold,
     ...retention,
     summarizationProvider: config.summarizationProvider ?? '',
     summarizationModel: config.summarizationModel ?? '',
@@ -109,12 +111,15 @@ export function resolveTargetPolicy(
   const override = config.modelPolicies.find(policy => (
     policy.provider === target.provider && policy.model === target.model
   ))
+  const inheritedThreshold: ResolvedThreshold = config.thresholdTokens === undefined
+    ? { thresholdRatio: config.thresholdRatio }
+    : { thresholdTokens: config.thresholdTokens }
   const inheritedRetention: ResolvedRetention = config.retainTokens === undefined
     ? { retainRatio: config.retainRatio }
     : { retainTokens: config.retainTokens }
   return deepFreeze({
     target: { provider: target.provider, model: target.model },
-    thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
+    ...resolveThreshold(override ?? {}, inheritedThreshold),
     ...resolveRetention(override ?? {}, inheritedRetention),
     summarizationProvider: override?.summarizationProvider ?? config.summarizationProvider,
     summarizationModel: override?.summarizationModel ?? config.summarizationModel,
@@ -126,25 +131,26 @@ export function resolveTargetPolicy(
 
 /**
  * Scale one routed policy into concrete token budgets for its model capacity.
+ * An absolute `thresholdTokens` policy needs no capacity; a ratio threshold
+ * requires the positive adapter-owned context window for that target.
  * @param policy - merged policy for the exact routed target.
- * @param contextWindow - positive adapter-owned capacity for that target.
+ * @param contextWindow - positive adapter-owned capacity for that target; required unless the policy carries `thresholdTokens`.
  * @returns detached immutable pressure and retention budgets.
  */
 export function resolveCompactSpec(
   policy: ResolvedTargetPolicy,
-  contextWindow: number,
+  contextWindow?: number,
 ): ResolvedCompactSpec {
   const targetKey = `${policy.target.provider}/${policy.target.model}`
-  if (!Number.isInteger(contextWindow) || contextWindow <= 0) {
+  if (contextWindow !== undefined
+    && (!Number.isInteger(contextWindow) || contextWindow <= 0)) {
     throw new TargetPressureConfigError(
       targetKey,
       `BasicCompactionConfig: contextWindow (${contextWindow}) must be a positive integer`,
     )
   }
-  const thresholdTokens = Math.floor(contextWindow * policy.thresholdRatio)
-  const retainTokens = policy.retainTokens === undefined
-    ? Math.floor(contextWindow * policy.retainRatio)
-    : policy.retainTokens
+  const thresholdTokens = resolveThresholdBudget(policy, contextWindow, targetKey)
+  const retainTokens = resolveRetainBudget(policy, contextWindow, targetKey)
   if (retainTokens >= thresholdTokens) {
     throw new TargetPressureConfigError(
       targetKey,
@@ -154,8 +160,7 @@ export function resolveCompactSpec(
   }
   return deepFreeze({
     target: { ...policy.target },
-    contextWindow,
-    thresholdRatio: policy.thresholdRatio,
+    ...contextWindow === undefined ? {} : { contextWindow },
     thresholdTokens,
     retainTokens,
     summarizationProvider: policy.summarizationProvider,
@@ -164,6 +169,57 @@ export function resolveCompactSpec(
     compactionRetries: policy.compactionRetries,
     maxOverflowRetries: policy.maxOverflowRetries,
   })
+}
+
+/** Resolve one routed policy's absolute pressure budget from its chosen form. */
+function resolveThresholdBudget(
+  policy: ResolvedTargetPolicy,
+  contextWindow: number | undefined,
+  targetKey: string,
+): number {
+  if (policy.thresholdTokens !== undefined) return policy.thresholdTokens
+  if (contextWindow === undefined) {
+    throw new TargetPressureConfigError(
+      targetKey,
+      `BasicCompactionConfig: ${targetKey} sets thresholdRatio without a model context `
+      + 'window; configure contextWindow on that adapter model or use an absolute thresholdTokens',
+    )
+  }
+  const ratio = policy.thresholdRatio
+  if (ratio === undefined) {
+    throw new TargetPressureConfigError(
+      targetKey,
+      `BasicCompactionConfig: ${targetKey} has no resolved pressure threshold`,
+    )
+  }
+  return Math.floor(contextWindow * ratio)
+}
+
+/** Resolve one routed policy's verbatim-tail budget from its chosen form. */
+function resolveRetainBudget(
+  policy: ResolvedTargetPolicy,
+  contextWindow: number | undefined,
+  targetKey: string,
+): number {
+  if (policy.retainTokens !== undefined) return policy.retainTokens
+  if (contextWindow === undefined) {
+    throw new TargetPressureConfigError(
+      targetKey,
+      `BasicCompactionConfig: ${targetKey} sets retainRatio without a model context `
+      + 'window; configure contextWindow on that adapter model or use an absolute retainTokens',
+    )
+  }
+  return Math.floor(contextWindow * policy.retainRatio)
+}
+
+/** Choose an explicit pressure-threshold form or inherit the already-resolved fallback. */
+function resolveThreshold(
+  config: CompactionPolicyConfig,
+  fallback: ResolvedThreshold,
+): ResolvedThreshold {
+  if (config.thresholdTokens !== undefined) return { thresholdTokens: config.thresholdTokens }
+  if (config.thresholdRatio !== undefined) return { thresholdRatio: config.thresholdRatio }
+  return fallback
 }
 
 /** Choose an explicit retention form or inherit the already-resolved fallback. */
@@ -176,16 +232,43 @@ function resolveRetention(
   return fallback
 }
 
+/**
+ * Overlay the user-owned runtime settings onto one routed policy. Each present
+ * override field replaces the policy's whole choice for that form, so a
+ * runtime `thresholdTokens` also retires an inherited `thresholdRatio` and a
+ * runtime `retainTokens` retires an inherited `retainRatio`.
+ * @param policy - merged policy for the exact routed target.
+ * @param override - normalized user-owned budgets; both fields optional.
+ * @returns detached immutable policy with the override applied.
+ */
+export function applyRuntimeOverride(
+  policy: ResolvedTargetPolicy,
+  override: { thresholdTokens?: number; retainTokens?: number },
+): ResolvedTargetPolicy {
+  if (override.thresholdTokens === undefined && override.retainTokens === undefined) return policy
+  const next: Record<string, unknown> = { ...policy }
+  if (override.thresholdTokens !== undefined) {
+    next.thresholdTokens = override.thresholdTokens
+    delete next.thresholdRatio
+  }
+  if (override.retainTokens !== undefined) {
+    next.retainTokens = override.retainTokens
+    delete next.retainRatio
+  }
+  return deepFreeze(next) as unknown as ResolvedTargetPolicy
+}
+
 /** Reject a capacity-independent retention conflict at plugin load. */
 function validateRatioRetention(
-  thresholdRatio: number,
+  threshold: ResolvedThreshold,
   retention: ResolvedRetention,
   name: string,
 ): void {
-  if (retention.retainRatio !== undefined && retention.retainRatio >= thresholdRatio) {
+  if (retention.retainRatio === undefined || threshold.thresholdRatio === undefined) return
+  if (retention.retainRatio >= threshold.thresholdRatio) {
     throw new Error(
       `${name}: retainRatio (${retention.retainRatio}) must be less than `
-      + `the resolved thresholdRatio (${thresholdRatio})`,
+      + `the resolved thresholdRatio (${threshold.thresholdRatio})`,
     )
   }
 }
@@ -229,12 +312,19 @@ function validatePolicy(
   name: string,
 ): void {
   const thresholdRatio = config.thresholdRatio
+  const thresholdTokens = config.thresholdTokens
   const retainRatio = config.retainRatio
   const retainTokens = config.retainTokens
   const maxTokens = config.maxTokens
   const compactionRetries = config.compactionRetries
   const maxOverflowRetries = config.maxOverflowRetries
   if (thresholdRatio !== undefined) assertRatio(`${name}.thresholdRatio`, thresholdRatio)
+  if (thresholdTokens !== undefined) {
+    assertPositiveInteger(`${name}.thresholdTokens`, thresholdTokens)
+  }
+  if (thresholdRatio !== undefined && thresholdTokens !== undefined) {
+    throw new Error(`${name}: thresholdRatio and thresholdTokens are mutually exclusive`)
+  }
   if (retainRatio !== undefined) assertRatio(`${name}.retainRatio`, retainRatio)
   if (retainTokens !== undefined) assertNonNegativeInteger(`${name}.retainTokens`, retainTokens)
   if (retainRatio !== undefined && retainTokens !== undefined) {

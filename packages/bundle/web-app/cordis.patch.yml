@@ -112,7 +112,10 @@
       name: '@deepseek-ai/dsh-host-webserver'
       inject: [webStartup]
       config:
-        host: !!js ctx.webStartup.host ?? '127.0.0.1'
+        # Bind the listener broadly so the GUI can enable sharing without a
+        # process restart. The web-app LAN guard denies every non-loopback
+        # request until the local operator enables an advertised IPv4 address.
+        host: !!js ctx.webStartup.host ?? '0.0.0.0'
         port: !!js ctx.webStartup.port ?? 3080
         compression: gzip
         compressionLevel: 1
@@ -135,6 +138,9 @@
         printUrl: true
         surfaceContext: true
         trustedHosts: !!js ctx.webStartup.trustedHosts
+        hindsightUrl: http://127.0.0.1:9077
+        hindsightBankId: coding-agent::deepseek-harness
+        knowledgeTimeoutMs: 5000
 
     # The client-plugin reload chain, always mounted: it is idle until a
     # rebuild watcher (pnpm run dev:web) actually rewrites client bundles. It
@@ -287,6 +293,11 @@
     - id: ui-plan
       name: '@deepseek-ai/dsh-client-ui-plan'
 
+    # Jailbreak control: the composer jailbreak seat over the jailbreak
+    # projection + /jailbreak channel (red-team safety evaluation surface).
+    - id: ui-jailbreak
+      name: '@deepseek-ai/dsh-client-ui-jailbreak'
+
     - id: ui-user-questions
       name: '@deepseek-ai/dsh-client-ui-user-questions'
 
@@ -363,6 +374,13 @@
   disabled: true
 
 - id: plan-mode
+  disabled: true
+
+# Jailbreak mode is per-agent state like plan mode, so the Web surface moves it
+# behind agent presets (each preset mounts its own instance); the host row is
+# disabled here exactly like plan-mode. The browser control (ui-jailbreak) stays
+# in the client roster above.
+- id: jailbreak-mode
   disabled: true
 
 # The token METER stays on the host plane; only the compaction backend that

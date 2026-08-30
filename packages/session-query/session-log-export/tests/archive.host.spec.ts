@@ -113,7 +113,7 @@ async function buildApi(
     } as never)
   }
   if (services.sessions !== undefined) ctx.provide('sessions', services.sessions as never)
-  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+  const connection = new HostConnectionService(ctx, () => [], {} as BrowserAuth)
   const fiber = ctx.plugin(SessionLogExport, {
     ...services.compressionLevel === undefined
       ? {}

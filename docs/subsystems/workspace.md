@@ -306,6 +306,19 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
 archiveSession(sessionId: SessionId): Promise<void>
 
 /**
+ * Durably delete one session: remove it from the global archive set, from
+ * every workspace's accounting, and from session persistence itself (its
+ * stored events cease to exist). A LIVE session rejects — its owner fiber
+ * still appends to the log, and a concurrent append would re-materialize a
+ * partial artifact; close it first. An unknown id rejects like archiving.
+ * The detach-before-delete order keeps every failure recoverable: if the
+ * persistence write fails, the session survives as an ungrouped row and the
+ * request can simply be retried.
+ * @param sessionId - The session to delete.
+ */
+async deleteSession(sessionId: SessionId): Promise<void>
+
+/**
  * Resolve by canonical directory path without creating or mutating a
  * workspace. A missing path rejects during `realpath`; an existing unowned
  * directory returns `undefined`.

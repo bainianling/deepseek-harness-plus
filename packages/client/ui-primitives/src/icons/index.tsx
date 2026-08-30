@@ -545,6 +545,16 @@ export const IconPaperclipOutline16 = ({ size = 16, className }: IconProps) => (
   </svg>
 )
 
+/** Document sheet with a folded corner, for plain file attachments. */
+export const IconFileOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M3.75 0.75H9.44189L13.25 4.55811V15.25H3.75V0.75ZM5.0498 2.05078V13.9492H11.9492V5.5H8.5V2.05078H5.0498ZM9.80078 2.45459V4.19922H11.5449L9.80078 2.45459Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
 /** ic_ds_loading_outline_16 */
 export const IconLoadingOutline16 = ({ size = 16, className }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -884,5 +894,131 @@ export const IconArchiveOutline20 = ({ size = 20, className }: IconProps) => (
       fill="currentColor"
     />
     <path d="M12.7962 12.5661V11.0832H7.20548V12.5661L12.7962 12.5661Z" fill="currentColor" />
+  </svg>
+)
+
+/** ic_ds_voice_outline_16 (harness-only): five audio-wave bars for the voice-clone nav section. */
+export const IconVoiceOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="1.5" y="5.75" width="1.8" height="4.5" rx="0.9" fill="currentColor" />
+    <rect x="4.3" y="3.5" width="1.8" height="9" rx="0.9" fill="currentColor" />
+    <rect x="7.1" y="1.75" width="1.8" height="12.5" rx="0.9" fill="currentColor" />
+    <rect x="9.9" y="3.5" width="1.8" height="9" rx="0.9" fill="currentColor" />
+    <rect x="12.7" y="5.75" width="1.8" height="4.5" rx="0.9" fill="currentColor" />
+  </svg>
+)
+
+/** ic_ds_news_outline_16 (harness-only): newspaper sheet for the AI-news nav section. */
+export const IconNewsOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M3 2.5H13C13.8284 2.5 14.5 3.17157 14.5 4V12C14.5 12.8284 13.8284 13.5 13 13.5H3C2.17157 13.5 1.5 12.8284 1.5 12V4C1.5 3.17157 2.17157 2.5 3 2.5ZM3 3.8C2.88954 3.8 2.8 3.88954 2.8 4V12C2.8 12.1105 2.88954 12.2 3 12.2H13C13.1105 12.2 13.2 12.1105 13.2 12V4C13.2 3.88954 13.1105 3.8 13 3.8H3Z"
+      fill="currentColor"
+    />
+    <rect x="3.9" y="4.8" width="3.6" height="2.8" rx="0.5" fill="currentColor" />
+    <rect x="8.4" y="4.8" width="3.7" height="1.1" rx="0.55" fill="currentColor" />
+    <rect x="8.4" y="6.5" width="3.7" height="1.1" rx="0.55" fill="currentColor" />
+    <rect x="3.9" y="8.8" width="8.2" height="1.1" rx="0.55" fill="currentColor" />
+    <rect x="3.9" y="10.7" width="5.4" height="1.1" rx="0.55" fill="currentColor" />
+  </svg>
+)
+
+/** ic_ds_chip_outline_16 (harness-only): chip with pins and core for the LoRA-training nav section. */
+export const IconChipOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M5 3.5H11C11.8284 3.5 12.5 4.17157 12.5 5V11C12.5 11.8284 11.8284 12.5 11 12.5H5C4.17157 12.5 3.5 11.8284 3.5 11V5C3.5 4.17157 4.17157 3.5 5 3.5ZM5 4.8C4.88954 4.8 4.8 4.88954 4.8 5V11C4.8 11.1105 4.88954 11.2 5 11.2H11C11.1105 11.2 11.2 11.1105 11.2 11V5C11.2 4.88954 11.1105 4.8 11 4.8H5Z"
+      fill="currentColor"
+    />
+    <rect x="6.5" y="6.5" width="3" height="3" rx="0.6" fill="currentColor" />
+    <rect x="5.6" y="1.7" width="1.5" height="1.8" rx="0.6" fill="currentColor" />
+    <rect x="8.9" y="1.7" width="1.5" height="1.8" rx="0.6" fill="currentColor" />
+    <rect x="5.6" y="12.5" width="1.5" height="1.8" rx="0.6" fill="currentColor" />
+    <rect x="8.9" y="12.5" width="1.5" height="1.8" rx="0.6" fill="currentColor" />
+    <rect x="1.7" y="5.6" width="1.8" height="1.5" rx="0.6" fill="currentColor" />
+    <rect x="1.7" y="8.9" width="1.8" height="1.5" rx="0.6" fill="currentColor" />
+    <rect x="12.5" y="5.6" width="1.8" height="1.5" rx="0.6" fill="currentColor" />
+    <rect x="12.5" y="8.9" width="1.8" height="1.5" rx="0.6" fill="currentColor" />
+  </svg>
+)
+
+/** ic_ds_network_outline_16 (harness-only): three linked nodes for the multi-AI collaboration nav section. */
+export const IconNetworkOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M7.05 5.25L4.35 10.3M8.95 5.25L11.65 10.3M5.5 12H10.5"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <circle cx="8" cy="3.4" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+    <circle cx="3.5" cy="12.1" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+    <circle cx="12.5" cy="12.1" r="1.9" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+)
+
+/** ic_ds_gauge_outline_16 (harness-only): gauge arc with needle for the model-testing nav section. */
+export const IconGaugeOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M2.5 11.5C2.5 8.46 4.96 6 8 6C11.04 6 13.5 8.46 13.5 11.5"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <path d="M8 10.5L10.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <circle cx="8" cy="10.8" r="1.4" fill="currentColor" />
+    <path d="M2.5 13.5H13.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+)
+
+/** ic_ds_knowledge_outline_16 (harness-only): open reference book for the knowledge-base nav section. */
+export const IconKnowledgeOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M2.3 3.2C4.42 2.78 6.27 3.17 8 4.36V13.2C6.27 12.01 4.42 11.62 2.3 12.04V3.2Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M13.7 3.2C11.58 2.78 9.73 3.17 8 4.36V13.2C9.73 12.01 11.58 11.62 13.7 12.04V3.2Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <path d="M4 5.4C4.86 5.35 5.61 5.49 6.3 5.82M10 5.82C10.69 5.49 11.44 5.35 12.3 5.4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+  </svg>
+)
+
+/** ic_ds_store_outline_16 (harness-only): compact storefront for the skill-market nav section. */
+export const IconStoreOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M2.5 6.2V13.3H13.5V6.2" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    <path d="M2 6.2L3.35 2.7H12.65L14 6.2H2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    <path d="M5.1 2.9L4.55 6.1M8 2.9V6.1M10.9 2.9L11.45 6.1" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    <path d="M4.4 9H7.2V11.2H4.4V9ZM9.4 9H11.6V13.2H9.4V9Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+  </svg>
+)
+
+/** ic_ds_clock_outline_16 (harness-only): clock face with hands for automation/schedule UI. */
+export const IconClockOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M8.00003 1.33333C4.31813 1.33333 1.33336 4.3181 1.33336 8C1.33336 11.6819 4.31813 14.6667 8.00003 14.6667C11.6819 14.6667 14.6667 11.6819 14.6667 8C14.6667 4.3181 11.6819 1.33333 8.00003 1.33333ZM0.0000305176 8C0.0000305176 3.58172 3.58175 0 8.00003 0C12.4183 0 16 3.58172 16 8C16 12.4183 12.4183 16 8.00003 16C3.58175 16 0.0000305176 12.4183 0.0000305176 8Z"
+      fill="currentColor"
+    />
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M8.00003 3.33333C8.36822 3.33333 8.6667 3.63181 8.6667 4V7.72386L10.8619 9.91905C11.1223 10.1794 11.1223 10.6015 10.8619 10.8619C10.6016 11.1222 10.1795 11.1222 9.91912 10.8619L7.52858 8.47134C7.40356 8.34632 7.33336 8.17674 7.33336 8V4C7.33336 3.63181 7.63184 3.33333 8.00003 3.33333Z"
+      fill="currentColor"
+    />
   </svg>
 )

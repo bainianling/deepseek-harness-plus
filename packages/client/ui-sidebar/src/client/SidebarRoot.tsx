@@ -18,9 +18,10 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  FishLogo, IconNewChatOutline16, IconPanelLeftOutline16, Tooltip,
+  FishLogo, IconClockOutline16, IconNewChatOutline16, IconPanelLeftOutline16, Tooltip, WallpaperPicker,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SidebarRootComponentProps } from './contract/slots.ts'
+import { AutomationPanel } from './AutomationPanel.tsx'
 import css from './SidebarRoot.module.css'
 
 /** Wide-content unmount delay; matches the 150ms wide-content fade-out. */
@@ -123,6 +124,10 @@ export function SidebarRoot({
 
   const buildVersion = localBuildVersion()
 
+  // Automation panel open state. The panel renders as a portal-style overlay
+  // anchored to the sidebar; closing returns focus to the trigger button.
+  const [automationOpen, setAutomationOpen] = useState(false)
+
   return (
     <div
       ref={column}
@@ -186,6 +191,13 @@ export function SidebarRoot({
         </Tooltip>
       </div>
 
+      {/* Wallpaper import control sits directly below the brand row (wide only). */}
+      {wide && (
+        <div className={css.wallpaperRow}>
+          <WallpaperPicker />
+        </div>
+      )}
+
       {/* Expanded, the button carries its own label — tooltip only on the rail. */}
       <Tooltip label={t('session.new.label')} delayMs={500} disabled={wide}>
         <button
@@ -196,6 +208,21 @@ export function SidebarRoot({
         >
           <IconNewChatOutline16 size={wide ? 14 : 18} />
           {wide && <span className={clsx(css.newSessionLabel, css.wide)}>{t('session.new')}</span>}
+        </button>
+      </Tooltip>
+
+      {/* Automation entry: opens the task scheduler panel. Sits directly below
+          New Session with secondary visual weight to distinguish from the
+          primary action. */}
+      <Tooltip label={t('automation.label')} delayMs={500} disabled={wide}>
+        <button
+          type="button"
+          className={css.automationButton}
+          aria-label={t('automation.label')}
+          onClick={() => { setAutomationOpen(true) }}
+        >
+          <IconClockOutline16 size={wide ? 14 : 18} />
+          {wide && <span className={clsx(css.automationLabel, css.wide)}>{t('automation')}</span>}
         </button>
       </Tooltip>
 
@@ -217,6 +244,15 @@ export function SidebarRoot({
           {renderSlot('sidebar.settings', { wide })}
         </div>
       </div>
+
+      {/* Automation panel overlay: rendered inside the sidebar column so it
+          inherits the sidebar's theme context and scrollbar policy. */}
+      {automationOpen && (
+        <AutomationPanel
+          t={t}
+          onClose={() => { setAutomationOpen(false) }}
+        />
+      )}
     </div>
   )
 }

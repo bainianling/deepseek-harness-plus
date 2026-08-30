@@ -38,7 +38,7 @@ dsh --profile web --no-open --port 8080
 
 ### 配置
 
-大多数用户不需要设置这些；命令行 flag 会提供给下面四个设置——`--host`、`--port` 与 `--trusted-host` 来自本次调用，`--no-open` 仅对本次调用关闭浏览器交接：
+大多数用户不需要设置这些；命令行 flag 提供本次调用拥有的设置，Hindsight 字段则选择知识库分区展示的只读数据源：
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
@@ -46,6 +46,9 @@ dsh --profile web --no-open --port 8080
 | `printUrl` | `true` | 启动时打印 `dsh web:` URL 行 |
 | `surfaceContext` | `true` | 给 agent（智能体）提供 GUI 定位上下文，并把 `DSH_WEB_URL` 暴露给其 shell 命令 |
 | `trustedHosts` | `[]` | 允许从网络访问 GUI 的额外主机 |
+| `hindsightUrl` | `http://127.0.0.1:9077` | 知识库分区使用的本地 Hindsight API |
+| `hindsightBankId` | `coding-agent::deepseek-harness` | 投影到本 GUI 的 Hindsight bank |
+| `knowledgeTimeoutMs` | `5000` | 每次 Hindsight 读取的超时，范围 100 到 30000 毫秒 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-web-app)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -83,15 +86,21 @@ URL 行与浏览器交接都是就绪信号：监督方一观察到该行就发�
 
 `resolveLanTrust` 在启动时只采样一次网络：loopback 绑定（`127.0.0.1`）不派生任何 LAN 地址，绑定所有网卡则会加入每个非 internal IPv4 字面量。派生字面量加上显式的 `--trusted-host` 权威标识组成 `/api` 浏览器信任栅栏，打印的 LAN URL 始终与该栅栏一致。
 
+### 知识投影
+
+知识库分区不会让浏览器直接调用 Hindsight。[`src/knowledge.ts`](src/knowledge.ts) 读取配置的 bank、扁平化文件夹树，并通过 `/api/knowledge/snapshot` 发布稳定的只读投影，通过 `/api/knowledge/pages/:id` 提供正文。快照包括知识页与文件夹元数据、来源标签、事实/文档/观察数量以及待处理或失败的后台操作；超时或 Hindsight 不可达时返回结构化 `503`，供 GUI 展示离线状态。编辑仍由 Hindsight 工具和 API 负责，因此浏览器代码不依赖其存储格式，未来也可以替换数据源。
+
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | `web-app` 粘合插件：dist 解析、LAN 信任采样、提示词段落、bash 变量、URL 行、浏览器交接 |
+| [`src/knowledge.ts`](src/knowledge.ts) | Hindsight 只读适配器与供知识库分区使用的稳定 `/api/knowledge` 投影 |
 | [`src/startup.ts`](src/startup.ts) | `web-startup` 提供方：`--host`、`--port`、`--trusted-host`、`--no-open`、`--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | Web patch：重述的基础值、Web 宿主行、浏览器名录、preset 之后的 agent 层 |
 | [`src/invariant.ts`](src/invariant.ts) | 不变式伴生插件：无运行时不变式；每项贡献都由 registry 释放 |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | dist 解析、fallback 席位、提示词段落、就绪宣告 |
+| [`tests/knowledge.spec.ts`](tests/knowledge.spec.ts) | 树扁平化、健康投影、离线响应与页面 ID 校验 |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | 在真实 Loader 树上的命令行解析 |
 | [`tests/trusted-hosts.spec.ts`](tests/trusted-hosts.spec.ts) | LAN 信任采样 |
 | [`tests/browser-open.spec.ts`](tests/browser-open.spec.ts) | 页面可达后的默认浏览器交接 |

@@ -136,6 +136,11 @@ export class SqliteSessionPersistence extends SessionPersistence {
     return this.store.list(signal)
   }
 
+  /** Durably remove one stored session (events + metadata row, one transaction). */
+  override delete(id: SessionId, signal?: AbortSignal): Promise<void> {
+    return this.store.deleteSession(id, signal)
+  }
+
   listSnapshots(signal?: AbortSignal): Promise<SessionPersistenceSnapshot[]> {
     return this.store.listSnapshots(signal)
   }

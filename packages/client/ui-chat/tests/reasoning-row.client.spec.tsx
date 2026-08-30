@@ -120,4 +120,23 @@ describe('ReasoningRow', () => {
     expect(view.container.querySelector('[class*="ioCard"]')).toBeNull()
     expect(view.container.querySelector('[class*="thinkBody"]')).not.toBeNull()
   })
+
+  it('hides provider reasoning delimiters, including an incomplete streaming suffix', () => {
+    const view = render(
+      <AssistantMarkdown
+        t={t}
+        blocks={[{ kind: 'reasoning', text: '<thinking>Plan the change</thinking><thin' }]}
+        streaming
+        renderMessageImages={renderMessageImages}
+      />,
+    )
+
+    expect(view.getByText('Plan the change')).toBeTruthy()
+    expect(view.container.textContent).not.toContain('<thinking>')
+    expect(view.container.textContent).not.toContain('</thinking>')
+    expect(view.container.textContent).not.toContain('<thin')
+
+    fireEvent.click(view.getByText('思考'))
+    expect(view.getAllByText('Plan the change')).toHaveLength(1)
+  })
 })

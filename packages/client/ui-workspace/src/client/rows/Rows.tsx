@@ -2,8 +2,8 @@
  * Workspace browser tree row components (figma Cell set 14:3080): pure presentational —
  * all data and callbacks arrive via props. Hover swaps (folder->chevron,
  * time->ellipsis, action buttons) are CSS-only. Row ... menus are visual-only
- * except workspace Rename/Delete and session Rename/Fork/Archive; the session
- * and workspace hover cards are suppressed while a menu is open.
+ * except workspace Rename/Delete and session Rename/Fork/Move/Archive/Delete; the
+ * session and workspace hover cards are suppressed while a menu is open.
  */
 import { useState } from 'react'
 import clsx from 'clsx'
@@ -352,13 +352,15 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.onOpen - open a session by id.
  * @param props.onRename - open the session rename dialog (id + current title).
  * @param props.onFork - fork a session at its last completed turn.
+ * @param props.onMove - open the move-to-workspace dialog (id + current title).
  * @param props.onArchive - archive a session by id.
+ * @param props.onDelete - open the session delete-confirmation dialog (id + title).
  * @param props.drag - optional draggable-row wiring.
  * @param props.flat - omit the empty status slot in the hierarchy-free flat list.
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
+export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onMove, onArchive, onDelete, drag, flat = false, t }: {
   node: SessionNode
   currentId: string | undefined
   now: number
@@ -367,8 +369,12 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   onRename: (id: SessionNode['id'], currentTitle: string) => void
   /** Fork a session at its last completed turn (row menu action). */
   onFork: (id: SessionNode['id']) => void
+  /** Open the browser-owned move-to-workspace dialog (row menu action). */
+  onMove: (id: SessionNode['id'], currentTitle: string) => void
   /** Archive this session (row menu action; commits without a dialog). */
   onArchive: (id: SessionNode['id']) => void
+  /** Open the browser-owned delete-confirmation dialog (destructive). */
+  onDelete: (id: SessionNode['id'], currentTitle: string) => void
   /** Present only on draggable rows (workspace-group sessions outside search). */
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
@@ -384,12 +390,15 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   const [menuOpen, setMenuOpen] = useState(false)
   // Archive hides the row through the registry-global archive set and never
   // touches the session log, so it is not styled as destructive and needs no
-  // confirmation dialog.
+  // confirmation dialog. Delete destroys the durable log, so it mirrors the
+  // workspace menu's danger styling and routes through a confirmation dialog.
   const sessionMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
+    { id: 'move', label: t('menu.moveSession'), icon: <IconFolderClose16 /> },
     // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
     { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    { id: 'delete', label: t('menu.deleteSession'), icon: <IconTrashOutline16 />, danger: true },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
@@ -438,7 +447,7 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
       <span className={css.title}>{title}</span>
       {/* A blank New Session row is a provisional placeholder: nothing has
           happened in it yet, so a "now" timestamp and the row verbs
-          (rename/fork/archive) would all act on content that does not
+          (rename/fork/archive/delete) would all act on content that does not
           exist — both trailing cells stay off until the first prompt. */}
       {!row.blank && <span className={css.time}>{timeLabel(row.updatedAt, now, t)}</span>}
       {!row.blank && (
@@ -449,9 +458,15 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
             items={sessionMenuItems}
             onSelect={(id) => {
               setMenuOpen(false)
+              // Unknown ids leave before the dispatch: a future menu row must
+              // not inherit the destructive branch as an else fallback.
+              /* v8 ignore next -- sessionMenuItems carries exactly these five rows today. */
+              if (id !== 'rename' && id !== 'fork' && id !== 'move' && id !== 'archive' && id !== 'delete') return
               if (id === 'rename') onRename(node.id, row.title)
               if (id === 'fork') onFork(node.id)
+              if (id === 'move') onMove(node.id, row.title)
               if (id === 'archive') onArchive(node.id)
+              if (id === 'delete') onDelete(node.id, row.title)
             }}
             portal
             closeOnPointerLeave

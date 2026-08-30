@@ -23,10 +23,13 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceDeleteValue,
   WorkspaceFollowFrame,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
+  WorkspaceMoveSessionRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
   WorkspaceError,
@@ -140,6 +143,14 @@ class ScriptedWorkspaceRemote implements WorkspaceRemote {
     throw new Error('unused')
   }
 
+  moveSession(_request: WorkspaceMoveSessionRequest): Promise<RemoteResult<WorkspaceValue>> {
+    throw new Error('unused')
+  }
+
+  deleteSession(_request: WorkspaceDeleteSessionRequest): Promise<RemoteResult<WorkspaceDeleteSessionValue>> {
+    throw new Error('unused')
+  }
+
   async *follow(signal = new AbortController().signal): AsyncIterable<WorkspaceFollowFrame> {
     const generation = this.generations[this.calls++]
     if (generation === undefined) throw new Error('no scripted Workspace generation')
@@ -179,6 +190,18 @@ class CommandWorkspaceRemote implements WorkspaceRemote {
   readonly archiveSession = vi.fn<WorkspaceRemote['archiveSession']>(request => Promise.resolve(remoteOk({
     archivedSessionIds: [request.sessionId],
   })))
+
+  // Explicit signatures (not WorkspaceRemote['…'] lookups): the generated
+  // Remote artifact lags behind src until its bundle regenerates.
+  readonly moveSession = vi.fn<(request: WorkspaceMoveSessionRequest) => Promise<RemoteResult<WorkspaceValue>>>(
+    request => Promise.resolve(remoteOk({
+      workspace: workspace(String(request.workspaceId), { sessionIds: [request.sessionId] }),
+    })),
+  )
+
+  readonly deleteSession = vi.fn<(request: WorkspaceDeleteSessionRequest) => Promise<RemoteResult<WorkspaceDeleteSessionValue>>>(
+    () => Promise.resolve(remoteOk({ deleted: true })),
+  )
 
   async *follow(_signal?: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {}
 }
@@ -439,6 +462,10 @@ describe('WorkspaceController', () => {
       sessionIds: ['session'],
     })
     await expect(controller.archiveSession(sid('session'))).resolves.toBeUndefined()
+    await expect(controller.moveSession(wid('one'), sid('session'))).resolves.toMatchObject({
+      sessionIds: ['session'],
+    })
+    await expect(controller.deleteSession(sid('session'))).resolves.toBeUndefined()
     await expect(controller.delete(wid('one'))).resolves.toBeUndefined()
   })
 
@@ -480,5 +507,19 @@ describe('WorkspaceController', () => {
     }))
     await expect(controller.insertSessionBefore(wid('missing'), sid('session')))
       .rejects.toThrow('workspace move failed: workspace-move-invalid: invalid move')
+    remote.moveSession.mockResolvedValueOnce(remoteFailure({
+      code: 'session-not-found',
+      message: 'missing session',
+      details: { sessionId: sid('session') },
+    }))
+    await expect(controller.moveSession(wid('missing'), sid('session')))
+      .rejects.toThrow('workspace session move failed: session-not-found: missing session')
+    remote.deleteSession.mockResolvedValueOnce(remoteFailure({
+      code: 'session-live',
+      message: 'still open',
+      details: { sessionId: sid('session') },
+    }))
+    await expect(controller.deleteSession(sid('session')))
+      .rejects.toThrow('workspace session delete failed: session-live: still open')
   })
 })

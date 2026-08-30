@@ -400,6 +400,7 @@ export class TerminalSessionService extends Service {
       type: record.type,
       ...record.session.pid !== undefined ? { pid: record.session.pid } : {},
       status: record.session.status(),
+      busy: record.active !== undefined,
       ...motd !== undefined ? { motd } : {},
     }
   }

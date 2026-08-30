@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-trajectory/client'
 import { ComposerAttachments } from './ComposerAttachments.tsx'
+import { ComposerImageImport } from './ComposerImageImport.tsx'
 import { MessageImages } from './MessageImages.tsx'
 
 /** Slot registry required by this presentation plugin. */
@@ -16,6 +17,10 @@ export function apply(ctx: ClientContext): void {
     name: 'conversation.input.attachments',
     locale: 'conversation',
   }, ComposerAttachments))
+  ctx.slots.inject('conversation.input.image-import', () => ctx.slots.register({
+    name: 'conversation.input.image-import',
+    locale: 'conversation',
+  }, ComposerImageImport))
   ctx.slots.inject('conversation.message.images', () => ctx.slots.register({
     name: 'conversation.message.images',
     locale: 'conversation',

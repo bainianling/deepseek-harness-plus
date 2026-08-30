@@ -206,6 +206,62 @@ describe('TrajectoryTable', () => {
     expect(screen.getByText('15 tok')).toBeTruthy()
   })
 
+  it('shows per-request cached and cache-created input tokens', () => {
+    const turns: readonly TrajectoryTurnModel[] = [{
+      turn: 1,
+      groups: [{
+        title: 'Step 1',
+        cells: [{
+          index: 1,
+          kind: 'message',
+          text: 'cached response',
+          input: 10,
+          cacheRead: 90,
+          cacheWrite: 5,
+          output: 20,
+          timeSeconds: 1,
+        }],
+      }],
+    }]
+
+    render(<TrajectoryTable turns={turns} {...FOLD_PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Request #1' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Usage' }))
+
+    expect(screen.getAllByText('Input')).toHaveLength(2)
+    expect(screen.getAllByText('105 tok')).toHaveLength(2)
+    expect(screen.getAllByText('Cache hit')).toHaveLength(2)
+    expect(screen.getAllByText('86%')).toHaveLength(2)
+    expect(screen.getAllByText('Cached')).toHaveLength(2)
+    expect(screen.getAllByText('90 tok')).toHaveLength(2)
+    expect(screen.getAllByText('Cache created')).toHaveLength(2)
+    expect(screen.getAllByText('5 tok')).toHaveLength(2)
+    expect(screen.getAllByText('Other')).toHaveLength(2)
+    expect(screen.getAllByText('10 tok')).toHaveLength(2)
+  })
+
+  it('hides the cache percentage when a request has no input usage', () => {
+    const turns: readonly TrajectoryTurnModel[] = [{
+      turn: 1,
+      groups: [{
+        title: 'Step 1',
+        cells: [{
+          index: 1,
+          kind: 'message',
+          text: 'output only',
+          output: 20,
+          timeSeconds: 1,
+        }],
+      }],
+    }]
+
+    render(<TrajectoryTable turns={turns} {...FOLD_PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Request #1' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Usage' }))
+
+    expect(screen.queryByText('Cache hit')).toBeNull()
+  })
+
   it('marks Summary scroll regions for interaction-only scrollbar thumbs', () => {
     render(<TrajectoryTable turns={TURNS} {...FOLD_PROPS} />)
     fireEvent.click(screen.getByRole('row', { name: /ASSISTANT/ }))

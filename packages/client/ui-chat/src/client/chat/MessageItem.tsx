@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconFileOutline16, JsonBlock, projectUserText, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
@@ -148,7 +148,7 @@ function TurnMaxTokensItem({ t }: {
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
+  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], previewImages, previewFiles, t,
 }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
@@ -162,12 +162,15 @@ function UserStyleBubble({
   referenceLabels?: readonly string[]
   /** Local submission-echo previews replacing the content-derived image group. */
   previewImages?: readonly MessageImageSource[]
+  /** Local submission-echo file cards matching the prompt's file parts. */
+  previewFiles?: readonly { readonly name?: string; readonly size: number }[]
   t: ChatViewSlotProps['t']
 }): ReactNode {
   const { text, images: contentImages, rest } = contentParts(content)
   const images = previewImages ?? contentImages
   const truncated = (total: number): string => t('json.truncated', { total })
   const showBubble = text !== '' || rest.length > 0
+  const files = previewFiles ?? []
   return (
     <div
       className={css.userRow}
@@ -177,6 +180,16 @@ function UserStyleBubble({
     >
       <div className={css.userStack}>
         {renderMessageImages({ images, align: 'end' })}
+        {files.length > 0 && (
+          <div className={css.echoFiles}>
+            {files.map((file, i) => (
+              <span key={i} className={css.echoFileChip}>
+                <IconFileOutline16 size={14} />
+                <span className={css.echoFileName}>{file.name === undefined || file.name === '' ? t('message.file') : file.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {showBubble && <div className={css.bubble}>
           {projectUserText(text, referenceLabels)}
           {rest.map((block, i) => <JsonBlock key={i} label={t('message.extraBlock')} payload={block} truncatedLabel={truncated} />)}
@@ -253,6 +266,7 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
     <UserStyleBubble
       content={content}
       previewImages={previewImages}
+      {...submission.files === undefined ? {} : { previewFiles: submission.files }}
       renderMessageImages={renderMessageImages}
       echo
       t={t}

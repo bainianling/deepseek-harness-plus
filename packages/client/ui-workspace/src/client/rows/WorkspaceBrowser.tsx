@@ -258,8 +258,12 @@ type SessionTreeProps = Pick<
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned session rename dialog. */
   onSessionRename: (sessionId: SessionNode['id'], currentTitle: string) => void
+  /** Open the browser-owned move-to-workspace dialog. */
+  onSessionMove: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Archive a session (row menu action; the row disappears on the state echo). */
   onSessionArchive: (sessionId: SessionNode['id']) => void
+  /** Open the browser-owned session delete-confirmation dialog (destructive). */
+  onSessionDeleteRequest: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
   orderBy: SessionOrderBy
 }
@@ -267,7 +271,7 @@ type SessionTreeProps = Pick<
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
 function SessionTree({
   useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+  onRenameRequest, onDeleteRequest, onSessionRename, onSessionMove, onSessionArchive, onSessionDeleteRequest,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -563,7 +567,9 @@ function SessionTree({
                     onOpen={open}
                     onRename={onSessionRename}
                     onFork={forkSession}
+                    onMove={onSessionMove}
                     onArchive={onSessionArchive}
+                    onDelete={onSessionDeleteRequest}
                     drag={dragProps}
                     t={t}
                   />
@@ -592,7 +598,8 @@ function SessionTree({
 
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
-  useSessions, useSessionPendingInteraction, open, forkSession, onSessionRename, onSessionArchive,
+  useSessions, useSessionPendingInteraction, open, forkSession, onSessionRename, onSessionMove,
+  onSessionArchive, onSessionDeleteRequest,
   archivedSessionIds,
   orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t,
 }: Pick<
@@ -602,7 +609,9 @@ function FlatList({
   | 'open'
   | 'forkSession'
   | 'onSessionRename'
+  | 'onSessionMove'
   | 'onSessionArchive'
+  | 'onSessionDeleteRequest'
   | 'archivedSessionIds'
   | 'orderBy'
   | 'sessionOrderByAccount'
@@ -682,7 +691,9 @@ function FlatList({
               onOpen={open}
               onRename={onSessionRename}
               onFork={forkSession}
+              onMove={onSessionMove}
               onArchive={onSessionArchive}
+              onDelete={onSessionDeleteRequest}
               flat
               drag={{
                 start: () => {
@@ -815,7 +826,9 @@ export function WorkspaceBrowser({
   deleteWorkspace,
   insertWorkspaceBefore,
   archiveSession,
+  deleteSession,
   insertSessionBefore,
+  moveSession,
   createWorkspace,
   searchSessions,
   searchResultLimit,
@@ -1032,6 +1045,67 @@ export function WorkspaceBrowser({
     })
   }
 
+  // Session delete dialog is separate from the row (the workspace delete
+  // pattern): destructive with no undo — the log leaves persistence and no
+  // archive slot remains. A live session rejects from the host.
+  const [sessionDeleteTarget, setSessionDeleteTarget] = useState<{ sessionId: SessionNode['id']; currentTitle: string } | null>(null)
+  const [sessionDeleting, setSessionDeleting] = useState(false)
+  const [sessionDeleteError, setSessionDeleteError] = useState<string | null>(null)
+  const closeSessionDelete = () => {
+    if (sessionDeleting) return
+    setSessionDeleteTarget(null)
+    setSessionDeleteError(null)
+  }
+  const confirmSessionDelete = () => {
+    if (sessionDeleteTarget === null || sessionDeleting) return
+    setSessionDeleting(true)
+    setSessionDeleteError(null)
+    deleteSession(sessionDeleteTarget.sessionId).then(() => {
+      setSessionDeleting(false)
+      setSessionDeleteTarget(null)
+    }).catch((reason: unknown) => {
+      setSessionDeleting(false)
+      setSessionDeleteError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+  const onSessionDeleteRequest = (sessionId: SessionNode['id'], currentTitle: string) => {
+    setSessionDeleteTarget({ sessionId, currentTitle })
+    setSessionDeleteError(null)
+  }
+
+  // Session move dialog lists the Workspaces that do not already account the
+  // session; the host detaches it from the current account and adopts it.
+  const [sessionMoveTarget, setSessionMoveTarget] = useState<{ sessionId: SessionNode['id']; currentTitle: string } | null>(null)
+  const [sessionMoving, setSessionMoving] = useState(false)
+  const [sessionMoveError, setSessionMoveError] = useState<string | null>(null)
+  const moveSourceWorkspace = sessionMoveTarget === null
+    ? undefined
+    : workspaces.find(workspace => workspace.sessionIds.includes(sessionMoveTarget.sessionId))
+  const moveCandidates = sessionMoveTarget === null
+    ? []
+    : workspaces.filter(workspace => workspace.workspaceId !== moveSourceWorkspace?.workspaceId)
+  const closeSessionMove = () => {
+    if (sessionMoving) return
+    setSessionMoveTarget(null)
+    setSessionMoveError(null)
+  }
+  const confirmSessionMove = (workspaceId: WorkspaceId) => {
+    if (sessionMoveTarget === null || sessionMoving) return
+    setSessionMoving(true)
+    setSessionMoveError(null)
+    moveSession(workspaceId, sessionMoveTarget.sessionId).then(() => {
+      setSessionMoving(false)
+      setSessionMoveTarget(null)
+    }).catch((reason: unknown) => {
+      setSessionMoving(false)
+      setSessionMoveError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+  const onSessionMove = (sessionId: SessionNode['id'], currentTitle: string) => {
+    setSessionMoveTarget({ sessionId, currentTitle })
+    setSessionMoveError(null)
+  }
+
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
   const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
@@ -1220,7 +1294,8 @@ export function WorkspaceBrowser({
               <FlatList
                 useSessions={useSessions} useSessionPendingInteraction={useSessionPendingInteraction}
                 open={open} forkSession={forkSession}
-                onSessionRename={onSessionRename} onSessionArchive={onSessionArchive}
+                onSessionRename={onSessionRename} onSessionMove={onSessionMove}
+                onSessionArchive={onSessionArchive} onSessionDeleteRequest={onSessionDeleteRequest}
                 archivedSessionIds={archivedSessionIds}
                 orderBy={orderBy}
                 sessionOrderByAccount={sessionOrderByAccount}
@@ -1235,7 +1310,9 @@ export function WorkspaceBrowser({
                 useSessions={useSessions}
                 useSessionPendingInteraction={useSessionPendingInteraction}
                 onSessionRename={onSessionRename}
+                onSessionMove={onSessionMove}
                 onSessionArchive={onSessionArchive}
+                onSessionDeleteRequest={onSessionDeleteRequest}
                 forkSession={forkSession}
                 workspaces={workspaces}
                 groupExpansion={groupExpansion}
@@ -1355,6 +1432,62 @@ export function WorkspaceBrowser({
       >
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
+      </Modal>
+      <Modal
+        open={sessionDeleteTarget !== null}
+        onClose={closeSessionDelete}
+        closeLabel={t('close')}
+        title={t('delete.session.title')}
+        {...sessionDeleteTarget === null
+          ? {}
+          : { description: t('delete.session.desc', { name: sessionDeleteTarget.currentTitle }) }}
+        footer={(
+          <>
+            <Button variant="outline" disabled={sessionDeleting} onClick={closeSessionDelete}>{t('cancel')}</Button>
+            <Button
+              variant="outline"
+              className={css.deleteAction}
+              disabled={sessionDeleting}
+              onClick={confirmSessionDelete}
+            >
+              {t('delete.session.title')}
+            </Button>
+          </>
+        )}
+      >
+        {sessionDeleting && <div className={css.deleteStatus} role="status">{t('delete.session.pending')}</div>}
+        {sessionDeleteError !== null && <div className={css.renameError} role="alert">{sessionDeleteError}</div>}
+      </Modal>
+      <Modal
+        open={sessionMoveTarget !== null}
+        onClose={closeSessionMove}
+        closeLabel={t('close')}
+        title={t('move.session.title')}
+        {...sessionMoveTarget === null
+          ? {}
+          : { description: t('move.session.desc', { name: sessionMoveTarget.currentTitle }) }}
+      >
+        {moveCandidates.length === 0 && <div className={css.deleteStatus}>{t('empty.none')}</div>}
+        <div className={css.moveList} role="listbox" aria-label={t('move.session.title')}>
+          {moveCandidates.map(workspace => (
+            <button
+              key={workspace.workspaceId}
+              type="button"
+              className={css.moveOption}
+              role="option"
+              aria-selected={false}
+              disabled={sessionMoving}
+              onClick={() => { confirmSessionMove(workspace.workspaceId) }}
+            >
+              <span className={css.moveOptionTitle}>{workspace.title}</span>
+              <span className={css.moveOptionMeta}>
+                {t('sessions.count.other', { n: workspace.sessionIds.length })}
+              </span>
+            </button>
+          ))}
+        </div>
+        {sessionMoving && <div className={css.deleteStatus} role="status">{t('move.session.pending')}</div>}
+        {sessionMoveError !== null && <div className={css.renameError} role="alert">{sessionMoveError}</div>}
       </Modal>
     </div>
   )

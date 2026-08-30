@@ -18,7 +18,8 @@
     "src/history.ts",
     "src/list.ts",
     "src/model-selection-projection.ts",
-    "src/skill-catalog.ts"
+    "src/skill-catalog.ts",
+    "src/terminal.ts"
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
@@ -42,6 +43,7 @@
     { "path": "../../session-query/session-query" },
     { "path": "../../skill/skill" },
     { "path": "../../subagent/subagent" },
+    { "path": "../../terminal/terminal" },
     { "path": "../../typert/protocol" },
     { "path": "../../typert/registry" },
     { "path": "../../workspace/workspace" }

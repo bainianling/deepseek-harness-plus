@@ -38,7 +38,7 @@ After startup you see a `dsh web:` line whose root URL carries a fresh process t
 
 ### Configuration
 
-Most users never set these; the command-line flags feed the four settings below — `--host`, `--port`, and `--trusted-host` come from the invocation, and `--no-open` turns the browser handoff off for that invocation:
+Most users never set these; command-line flags feed the invocation-owned settings, while the Hindsight fields select the read-only source shown by the Knowledge section:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -46,6 +46,9 @@ Most users never set these; the command-line flags feed the four settings below 
 | `printUrl` | `true` | Print the `dsh web:` URL line at startup |
 | `surfaceContext` | `true` | Give the agent GUI-orientation context and expose `DSH_WEB_URL` to its shell commands |
 | `trustedHosts` | `[]` | Extra hosts allowed to reach the GUI from the network |
+| `hindsightUrl` | `http://127.0.0.1:9077` | Local Hindsight API used by the Knowledge section |
+| `hindsightBankId` | `coding-agent::deepseek-harness` | Hindsight bank projected into this GUI |
+| `knowledgeTimeoutMs` | `5000` | Timeout for each Hindsight read, from 100 to 30000 ms |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -83,15 +86,21 @@ The URL line and browser handoff are readiness signals: supervisors RPC as soon 
 
 `resolveLanTrust` samples the network once at boot: a loopback bind (`127.0.0.1`) derives no LAN addresses, while an all-interfaces bind adds every non-internal IPv4 literal. The derived literals plus the explicit `--trusted-host` authorities form the `/api` browser-trust fence, and the printed LAN URL always matches that fence.
 
+### Knowledge projection
+
+The Knowledge section never calls Hindsight directly from the browser. [`src/knowledge.ts`](src/knowledge.ts) reads the configured bank, flattens its folder tree, and publishes a stable read-only projection at `/api/knowledge/snapshot` plus page content at `/api/knowledge/pages/:id`. The snapshot includes page and folder metadata, source tags, fact/document/observation counts, and pending or failed background operations; a timeout or unreachable Hindsight service returns a structured `503` so the GUI can show an offline state. Editing remains owned by Hindsight tools and APIs, which keeps browser code independent from its storage format and leaves the source replaceable.
+
 ### Source map
 
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | The `web-app` glue plugin: dist resolution, LAN trust sampling, prompt sections, bash variable, URL line, browser handoff |
+| [`src/knowledge.ts`](src/knowledge.ts) | Read-only Hindsight adapter and stable `/api/knowledge` projection for the Knowledge section |
 | [`src/startup.ts`](src/startup.ts) | The `web-startup` provider: `--host`, `--port`, `--trusted-host`, `--no-open`, `--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | The web patch: restated base values, web host rows, browser roster, agent plane behind presets |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: no runtime invariant; every contribution is registry-disposed |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | Dist resolution, fallback seat, prompt sections, readiness |
+| [`tests/knowledge.spec.ts`](tests/knowledge.spec.ts) | Tree flattening, health projection, offline response, and page-ID validation |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | Command-line parsing over a real Loader tree |
 | [`tests/trusted-hosts.spec.ts`](tests/trusted-hosts.spec.ts) | LAN-trust sampling |
 | [`tests/browser-open.spec.ts`](tests/browser-open.spec.ts) | Default-browser handoff after the page is reachable |

@@ -8,10 +8,12 @@ import { frameSummary } from '@deepseek-ai/dsh-compaction-basic/src/summarizer.t
 import type { SummarizationInput, SummaryResult } from '@deepseek-ai/dsh-compaction-basic/src/summarizer.ts'
 import { CompactionId, toolPairingBalancedAfter, toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction'
 import {
+  applyRuntimeOverride,
   resolveCompactSpec,
   resolveConfig,
   resolveTargetPolicy,
 } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
+import { normalizeRuntimeOverride } from '@deepseek-ai/dsh-compaction-basic/src/settings.ts'
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
 import LlmRuntime, { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, createToolResultMessage, LlmAdapter , createMessage } from '@deepseek-ai/dsh-llm'
 import type {
@@ -473,6 +475,112 @@ describe('compact configuration and defaults', () => {
     expect(() => resolveCompactSpec(invalidPressure, 1_000)).toThrow(/less than threshold/)
     expect(() => resolveCompactSpec(invalidPressure, 1.5)).toThrow(/positive integer/)
     expect(() => resolveCompactSpec(invalidPressure, 0)).toThrow(/positive integer/)
+  })
+
+  it('resolves an absolute capacity-independent thresholdTokens policy', () => {
+    const resolved = resolveConfig({
+      thresholdTokens: 32_000,
+      retainTokens: 4_000,
+    })
+    expect(resolved).toMatchObject({
+      thresholdTokens: 32_000,
+      retainTokens: 4_000,
+    })
+    expect(resolved).not.toHaveProperty('thresholdRatio')
+    expect(Object.isFrozen(resolved)).toBe(true)
+
+    const spec = resolveCompactSpec(resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL }))
+    expect(spec).toMatchObject({
+      thresholdTokens: 32_000,
+      retainTokens: 4_000,
+    })
+    expect(spec).not.toHaveProperty('contextWindow')
+    // A declared model window must not rescale an absolute budget.
+    expect(resolveCompactSpec(
+      resolveTargetPolicy(resolved, { provider: MODEL, model: MODEL }),
+      1_000_000,
+    )).toMatchObject({ thresholdTokens: 32_000 })
+  })
+
+  it('pairs an absolute threshold with a ratio retention when capacity exists', () => {
+    const policy = resolveTargetPolicy(resolveConfig({
+      thresholdTokens: 5_000,
+      retainRatio: 0.1,
+    }), { provider: MODEL, model: MODEL })
+    expect(() => resolveCompactSpec(policy)).toThrow(/retainRatio without a model context/)
+    expect(resolveCompactSpec(policy, 10_000)).toMatchObject({
+      thresholdTokens: 5_000,
+      retainTokens: 1_000,
+    })
+  })
+
+  it('rejects exclusive or non-positive threshold forms and replaces the inherited choice', () => {
+    expect(() => resolveConfig({
+      thresholdRatio: 0.5,
+      thresholdTokens: 1_000,
+    })).toThrow(/thresholdRatio and thresholdTokens are mutually exclusive/)
+    expect(() => resolveConfig({
+      modelPolicies: [{ provider: MODEL, model: MODEL, thresholdRatio: 0.5, thresholdTokens: 1_000 }],
+    })).toThrow(/modelPolicies\[0\]: thresholdRatio and thresholdTokens are mutually exclusive/)
+    expect(() => resolveConfig({ thresholdTokens: 0 })).toThrow(/must be a positive integer/)
+
+    // A per-model absolute threshold replaces the default ratio wholesale.
+    const config = resolveConfig({
+      thresholdRatio: 0.8,
+      retainTokens: 100,
+      modelPolicies: [{
+        provider: 'abs-provider',
+        model: 'abs-model',
+        thresholdTokens: 2_000,
+      }],
+    })
+    const overridden = resolveTargetPolicy(config, { provider: 'abs-provider', model: 'abs-model' })
+    expect(overridden).toMatchObject({ thresholdTokens: 2_000, retainTokens: 100 })
+    expect(overridden).not.toHaveProperty('thresholdRatio')
+    expect(resolveCompactSpec(overridden)).toMatchObject({ thresholdTokens: 2_000 })
+
+    // An unrelated target keeps the default ratio form.
+    const inherited = resolveTargetPolicy(config, { provider: 'other-provider', model: 'other-model' })
+    expect(inherited).toMatchObject({ thresholdRatio: 0.8 })
+    expect(inherited).not.toHaveProperty('thresholdTokens')
+  })
+
+  it('requires capacity exactly when the resolved policy scales by ratio', () => {
+    const ratioPolicy = resolveTargetPolicy(
+      resolveConfig({ retainTokens: 10 }),
+      { provider: MODEL, model: MODEL },
+    )
+    expect(() => resolveCompactSpec(ratioPolicy)).toThrow(/thresholdRatio without a model context/)
+  })
+
+  it('overlays the user-owned runtime override wholesale onto the routed policy', () => {
+    const policy = resolveTargetPolicy(resolveConfig({
+      thresholdRatio: 0.8,
+      retainRatio: 0.1,
+    }), { provider: MODEL, model: MODEL })
+    const normalized = normalizeRuntimeOverride({
+      thresholdTokens: 48_000,
+      retainTokens: null,
+    })
+    expect(normalized).toEqual({ thresholdTokens: 48_000 })
+
+    // An absolute threshold replaces the ratio form; retention keeps its choice.
+    const thresholdOverride = applyRuntimeOverride(policy, normalized)
+    expect(thresholdOverride).toMatchObject({ thresholdTokens: 48_000, retainRatio: 0.1 })
+    expect(thresholdOverride).not.toHaveProperty('thresholdRatio')
+    expect(resolveCompactSpec(thresholdOverride, 200_000)).toMatchObject({ thresholdTokens: 48_000 })
+
+    // A runtime retain budget replaces the ratio form.
+    const bothOverride = applyRuntimeOverride(policy, normalizeRuntimeOverride({
+      thresholdTokens: 0,
+      retainTokens: 6_000,
+    }))
+    expect(bothOverride.thresholdTokens).toBeUndefined()
+    expect(bothOverride).toMatchObject({ retainTokens: 6_000 })
+
+    // No stored values leaves the composed policy untouched and frozen.
+    expect(applyRuntimeOverride(policy, {})).toBe(policy)
+    expect(Object.isFrozen(thresholdOverride)).toBe(true)
   })
 
 })

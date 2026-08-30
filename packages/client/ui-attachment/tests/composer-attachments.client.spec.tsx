@@ -6,6 +6,7 @@ import type {
   ComposerAttachment, ComposerAttachmentsOwnerProps, ComposerAttachmentsProps,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { ComposerAttachments } from '../src/client/ComposerAttachments.tsx'
+import { ComposerImageImport } from '../src/client/ComposerImageImport.tsx'
 
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
@@ -23,6 +24,8 @@ afterEach(() => {
 const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => {
   const messages: Record<string, string> = {
     'image.pending': '待发送图片',
+    'image.import': '导入图片',
+    'image.added': '已添加 {count} 张图片',
     'image.original': '原图',
     'image.preview': '原图预览',
     'image.closePreview': '关闭原图预览',
@@ -35,6 +38,10 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
   if (key === 'image.remove') {
     const name = params?.name
     return `移除图片 ${typeof name === 'string' ? name : ''}`
+  }
+  if (key === 'image.added') {
+    const count = params?.count
+    return `已添加 ${typeof count === 'number' ? String(count) : ''} 张图片`
   }
   if (key === 'image.dropDesc') {
     const count = params?.count
@@ -129,6 +136,28 @@ describe('ComposerAttachments', () => {
     fireEvent.drop(document.body, { dataTransfer })
     expect(onAddImages).not.toHaveBeenCalled()
     expect(view.queryByRole('status')).toBeNull()
+  })
+
+  it('keeps the image picker in the dedicated toolbar component and forwards selected files', () => {
+    const onAddImages = vi.fn()
+    const view = render(<ComposerImageImport {...props({ onAddImages })} />)
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!
+    const click = vi.spyOn(input, 'click')
+    const image = attachment('picked').file
+
+    fireEvent.click(view.getByRole('button', { name: '导入图片' }))
+    expect(click).toHaveBeenCalledOnce()
+    fireEvent.change(input, { target: { files: [image] } })
+    expect(onAddImages).toHaveBeenCalledWith([image])
+  })
+
+  it('shows a visible filename and added-image count for pending attachments', () => {
+    const image = attachment('draft-1', 'pasted-image.png')
+    const view = render(<ComposerAttachments {...props({ attachments: [image] })} />)
+
+    expect(view.getByRole('status').textContent).toBe('已添加 1 张图片')
+    expect(view.getByText('pasted-image.png', { selector: 'button' })).toBeTruthy()
+    expect(view.getByAltText('pasted-image.png')).toBeTruthy()
   })
 
   it('routes rail removal and closes previews on Escape or attachment removal', () => {

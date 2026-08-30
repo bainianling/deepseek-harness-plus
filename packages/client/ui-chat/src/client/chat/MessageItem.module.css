@@ -40,6 +40,36 @@
   word-break: break-word;
 }
 
+/* Submission-echo file cards: the same visual tier as the image group above
+   the bubble, right-aligned like the rest of the user row. */
+.echoFiles {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.echoFileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 8px;
+  background: var(--dsw-specific-bubble);
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(18px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+.echoFileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .referenceSummary {
   color: var(--dsw-alias-label-tertiary);
   font-size: var(--dsh-content-font-size-secondary, 13px);
@@ -58,9 +88,10 @@
 
 .compactionButton {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   width: 100%;
-  height: calc(24px + var(--dsh-content-font-delta, 0px));
+  min-height: calc(24px + var(--dsh-content-font-delta, 0px));
   min-width: 0;
   padding: 0;
   border: none;
@@ -143,6 +174,17 @@
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compactionSummary[data-compaction-cache] {
+  flex: 0 0 100%;
+  padding-left: calc(22px + var(--dsh-content-font-delta, 0px));
+  overflow: visible;
+  color: var(--dsw-alias-label-caption);
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px));
+  line-height: calc(18px + var(--dsh-content-font-delta, 0px));
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .compactionBody {

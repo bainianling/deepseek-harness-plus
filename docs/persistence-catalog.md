@@ -463,6 +463,24 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:19`](../packages/hooks/hook-
 
 Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-protocol/src/types.ts)
 
+### `jailbreak/*`
+
+<a id="jailbreakmode--log-only"></a>
+
+#### `jailbreak/mode` — log-only
+
+```ts persistence-catalog
+/**
+ * Whether jailbreak mode is in force from this point on, with the strategy
+ * selected for that state: log-only, non-surface, whole-value replace. The
+ * last `jailbreak/mode` wins; a log with none folds to inactive through
+ * {@link foldJailbreakMode}.
+ */
+'jailbreak/mode': { active: boolean; strategy: string }
+```
+
+Source: [`packages/jailbreak/jailbreak-mode/src/index.ts:54`](../packages/jailbreak/jailbreak-mode/src/index.ts)
+
 ### `llm/*`
 
 <a id="llmretry--log-only"></a>

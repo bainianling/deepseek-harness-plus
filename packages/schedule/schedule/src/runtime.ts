@@ -29,9 +29,12 @@ interface EveryDue {
 type DueDecision =
   | { readonly kind: 'one-shot'; readonly record: OneShotScheduleRecord }
   | { readonly kind: 'every'; readonly reminders: readonly EveryDue[]; readonly acceptedAt: string }
+  | { readonly kind: 'idle-deferred'; readonly target?: number }
   | { readonly kind: 'wait'; readonly target?: number }
 
-/** Select one due one-shot, one complete fixed-rate batch, or the next wake. */
+/** Select one due one-shot, one complete fixed-rate batch, or the next wake.
+ *  Idle-priority tasks that are due are reported as 'idle-deferred' so the
+ *  runtime waits for an agent idle window before dispatching them. */
 function dueDecision(folded: FoldedSchedules, now: number): DueDecision {
   const indexed = folded.active.map((record, index) => ({ record, index }))
   const byTargetThenCreate = (
@@ -40,13 +43,19 @@ function dueDecision(folded: FoldedSchedules, now: number): DueDecision {
   ): number => Date.parse(left.record.scheduledAt) - Date.parse(right.record.scheduledAt)
     || left.index - right.index
 
-  const oneShot = indexed
+  // Separate idle-priority from immediate tasks.
+  const immediateIndexed = indexed.filter(entry => !entry.record.idlePriority)
+  const idleIndexed = indexed.filter(entry => entry.record.idlePriority === true)
+
+  // Immediate one-shot
+  const oneShot = immediateIndexed
     .filter((entry): entry is { record: OneShotScheduleRecord; index: number } =>
       entry.record.kind !== 'every' && Date.parse(entry.record.scheduledAt) <= now)
     .sort(byTargetThenCreate)[0]?.record
   if (oneShot !== undefined) return { kind: 'one-shot', record: oneShot }
 
-  const every = indexed
+  // Immediate every
+  const every = immediateIndexed
     .filter((entry): entry is { record: EveryScheduleRecord; index: number } =>
       entry.record.kind === 'every' && Date.parse(entry.record.scheduledAt) <= now)
     .sort(byTargetThenCreate)
@@ -59,6 +68,17 @@ function dueDecision(folded: FoldedSchedules, now: number): DueDecision {
         occurrenceAt: resolveEveryOccurrence(record, now).occurrenceAt,
       })),
     }
+  }
+
+  // Check for idle-priority tasks that are due — defer to idle window.
+  const idleDue = idleIndexed.some(entry => Date.parse(entry.record.scheduledAt) <= now)
+  if (idleDue) {
+    // Find the next non-idle target for the timer fallback.
+    const target = folded.active.reduce<number | undefined>((selected, record) => {
+      const candidate = Date.parse(record.scheduledAt)
+      return candidate > now && (selected === undefined || candidate < selected) ? candidate : selected
+    }, undefined)
+    return { kind: 'idle-deferred', ...(target === undefined ? {} : { target }) }
   }
 
   const target = folded.active.reduce<number | undefined>((selected, record) => {
@@ -250,6 +270,14 @@ export class ScheduleRuntime {
       if (wakeDecision.target !== undefined) this.arm(wakeDecision.target, wakeNow)
       return
     }
+    // Idle-priority tasks are due but deferred: wait for the agent to become
+    // idle before dispatching. The timer arms as a fallback so we re-check if
+    // the idle window never arrives before the next scheduled target.
+    if (wakeDecision.kind === 'idle-deferred') {
+      if (wakeDecision.target !== undefined) this.arm(wakeDecision.target, wakeNow)
+      this.waitForIdle()
+      return
+    }
 
     let maintenance: Promise<boolean>
     try {
@@ -262,6 +290,13 @@ export class ScheduleRuntime {
         if (decision === undefined) return Promise.resolve(false)
         if (decision.kind === 'wait') {
           if (decision.target !== undefined) this.arm(decision.target, decisionNow)
+          return Promise.resolve(false)
+        }
+        // Inside runMaintenance we are already in an idle window, so
+        // idle-deferred tasks may now be dispatched as immediate.
+        if (decision.kind === 'idle-deferred') {
+          if (decision.target !== undefined) this.arm(decision.target, decisionNow)
+          this.waitForIdle()
           return Promise.resolve(false)
         }
         try {

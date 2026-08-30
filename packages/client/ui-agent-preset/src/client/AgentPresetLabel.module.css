@@ -1,12 +1,13 @@
-/* Session-header agent-preset label: static chrome, never a control. */
+/* Session-header agent-preset control: a quiet chip that opens the picker. */
 
 .label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 180px;
-  padding: 0 2px 0 0;
+  padding: 0 4px 0 6px;
   height: 22px;
+  border: none;
   border-radius: 6px;
   background: var(--dsw-alias-fill-tsp-secondary);
   font-size: 12px;
@@ -15,9 +16,24 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.label:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.label:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .icon {
   flex: none;
   opacity: 0.7;
+}
+
+.chevron {
+  flex: none;
+  opacity: 0.55;
 }

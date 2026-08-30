@@ -1,0 +1,28 @@
+# dsh-ai-news bundle patch: the AI realtime news aggregator row.
+#
+# One host row over the web surface: it registers the /api/ai-news routes on
+# the shared webServer, keeps the crawl store under $DSH_HOME/data/ai-news,
+# and re-crawls when the store is older than `intervalHours` (daily by
+# default). `proxy` empty means auto-detect the Windows system proxy; set an
+# explicit `http://host:port` to pin or disable ('none') it. The X timelines
+# and the overseas RSS feeds depend on that proxy from networks that block
+# them; every other source is fetched directly.
+#
+# Auto-translation: after each crawl, English titles/summaries (X posts and
+# the overseas RSS feeds) are translated into Chinese through an
+# OpenAI-compatible chat endpoint (DashScope by default; the key is read from
+# the `translateApiKeyEnv` environment variable). Set `translateEnabled: false`
+# to turn it off, or override `translateModel` / `translateBaseUrl`.
+- insert:
+    - id: ai-news
+      name: '@deepseek-ai/dsh-ai-news'
+      inject: [webServer]
+      config:
+        enabled: true
+        intervalHours: 24
+        maxItems: 400
+        proxy: ''
+        platforms: [bilibili, douyin, xiaohongshu, x, rss]
+        translateEnabled: true
+        translateApiKeyEnv: DASHSCOPE_API_KEY
+        translateModel: qwen-turbo

@@ -3,7 +3,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
+  WorkspaceAdoptInvalidError,
   WorkspaceId,
+  WorkspaceLiveSessionError,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
   WorkspaceUnknownSessionError,
@@ -16,9 +18,12 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceDeleteValue,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
+  WorkspaceMoveSessionRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
   WorkspaceValue,
@@ -160,6 +165,58 @@ export class WorkspaceCommands {
       throw failure('session-not-found', error.message, { sessionId: request.sessionId })
     }
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
+  }
+
+  /**
+   * Move one accounted Session into a target Workspace, detaching it from every
+   * other account in the same serialized operation.
+   * @param request - target Workspace, Session, and optional anchor identities.
+   * @returns the updated target Workspace projection.
+   */
+  async moveSession(request: WorkspaceMoveSessionRequest): Promise<WorkspaceValue> {
+    const target = this.requireWorkspace(request.workspaceId)
+    try {
+      await this.ctx.workspaceRegistry.moveSession(
+        request.sessionId,
+        target.id,
+        request.beforeSessionId,
+      )
+    } catch (error) {
+      if (error instanceof WorkspaceUnknownSessionError) {
+        throw failure('session-not-found', error.message, { sessionId: request.sessionId })
+      }
+      if (!(error instanceof WorkspaceAdoptInvalidError)) throw error
+      throw failure(
+        'workspace-move-invalid',
+        error.message,
+        {
+          workspaceId: request.workspaceId,
+          sessionId: request.sessionId,
+          ...request.beforeSessionId === undefined
+            ? {}
+            : { beforeSessionId: request.beforeSessionId },
+        },
+      )
+    }
+    return { workspace: workspaceView(target) }
+  }
+
+  /**
+   * Durably delete one Session from every Workspace account and session persistence.
+   * @param request - Session identity to delete.
+   * @returns deletion confirmation.
+   */
+  async deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteSessionValue> {
+    try {
+      await this.ctx.workspaceRegistry.deleteSession(request.sessionId)
+    } catch (error) {
+      if (error instanceof WorkspaceUnknownSessionError) {
+        throw failure('session-not-found', error.message, { sessionId: request.sessionId })
+      }
+      if (!(error instanceof WorkspaceLiveSessionError)) throw error
+      throw failure('session-live', error.message, { sessionId: request.sessionId })
+    }
+    return { deleted: true }
   }
 
   private requireWorkspace(workspaceId: WorkspaceId): Workspace {

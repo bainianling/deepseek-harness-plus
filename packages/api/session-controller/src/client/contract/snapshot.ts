@@ -30,6 +30,14 @@ export interface PendingSubmissionImage {
   readonly height?: number
 }
 
+/** One plain file displayed by a local submission echo before durable admission. */
+export interface PendingSubmissionFile {
+  /** Browser file name, when the file had one. */
+  readonly name?: string
+  /** Byte size reported by the browser. */
+  readonly size: number
+}
+
 /**
  * One local prompt-submission echo: inserted synchronously when a submission
  * begins, so the conversation can show the message before serialization,
@@ -45,6 +53,8 @@ export interface PendingSubmission {
   readonly text: string
   /** Ordered image previews matching the prompt's image parts. */
   readonly images: readonly PendingSubmissionImage[]
+  /** Ordered file cards matching the prompt's file parts. */
+  readonly files?: readonly PendingSubmissionFile[]
 }
 
 /** History-open lifecycle of a Session event window. */

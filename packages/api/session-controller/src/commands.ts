@@ -1,11 +1,14 @@
 /** Session commands whose activation policy is explicit at each Remote method. */
 
 import { randomUUID } from 'node:crypto'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, ModelSelection as AgentModelSelection } from '@deepseek-ai/dsh-agent'
 import { PresetMountError, UnknownPresetError } from '@deepseek-ai/dsh-agent-presets'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { formatFileMention } from '@deepseek-ai/dsh-file-reference'
 import {
   ReasoningEffortId, createUserMessage, freezeMessage,
 } from '@deepseek-ai/dsh-llm'
@@ -27,6 +30,7 @@ import {
   inspectApiSession,
 } from './agent.ts'
 import type {
+  PromptContentPart,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -43,6 +47,12 @@ import type {
   SessionSelectModelValue,
   SessionUpdateQueueRequest,
   SessionUpdateQueueValue,
+} from './types.ts'
+import {
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_MAX_FILES_PER_MESSAGE,
+  DEFAULT_MAX_MESSAGE_FILE_BYTES,
+  PROMPT_FILE_UPLOAD_DIR,
 } from './types.ts'
 
 interface SessionReadState {
@@ -306,6 +316,7 @@ export class SessionCommandController {
       ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
     }
     const hasImage = request.content.some(part => part.type === 'image')
+    const hasFile = request.content.some(part => part.type === 'file')
     const admit = async (): Promise<SessionPromptValue> => {
       try {
         if (hasImage) {
@@ -319,7 +330,14 @@ export class SessionCommandController {
             )
           }
         }
-        const content = await durablePromptContent(this.ctx, request.content)
+        // File uploads land in the Session workspace before admission: each
+        // part becomes an `@path` workspace reference text part, so the
+        // durable message carries the mention and the bytes stay readable by
+        // the filesystem tools.
+        const importable = hasFile
+          ? await this.importPromptFiles(agent, request.content)
+          : request.content
+        const content = await durablePromptContent(this.ctx, importable)
         const message: UserMessage = createUserMessage({ content, source })
         if (request.mode === 'steer') agent.steer(message)
         else agent.followup(message)
@@ -333,6 +351,94 @@ export class SessionCommandController {
       return { accepted: true }
     }
     return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
+  }
+
+  /** Serializes prompt-file writes so concurrent prompts never race one upload name. */
+  private fileImportChain: Promise<unknown> = Promise.resolve()
+
+  /**
+   * Write every file upload in one prompt into the Session workspace's upload
+   * directory and replace each part with an `@path` workspace-reference text
+   * part. Non-file parts pass through unchanged, preserving order.
+   * @param agent - Session Agent whose workspace receives the uploads.
+   * @param content - prompt content including zero or more file parts.
+   * @returns content with every file part replaced by its workspace mention.
+   */
+  private importPromptFiles(
+    agent: Agent,
+    content: readonly PromptContentPart[],
+  ): Promise<readonly PromptContentPart[]> {
+    const run = async (): Promise<readonly PromptContentPart[]> => {
+      const files = content.filter(part => part.type === 'file')
+      if (files.length > DEFAULT_MAX_FILES_PER_MESSAGE) {
+        throw new AttachmentError(
+          `a message can include at most ${String(DEFAULT_MAX_FILES_PER_MESSAGE)} files`,
+          'TOO_MANY_FILES',
+        )
+      }
+      let total = 0
+      const decoded = files.map((part) => {
+        const bytes = decodeUpload(part.data)
+        total += bytes.byteLength
+        if (bytes.byteLength > DEFAULT_MAX_FILE_BYTES) {
+          throw new AttachmentError(
+            `file "${part.name}" exceeds the ${String(DEFAULT_MAX_FILE_BYTES)}-byte limit`,
+            'FILE_TOO_LARGE',
+          )
+        }
+        return bytes
+      })
+      if (total > DEFAULT_MAX_MESSAGE_FILE_BYTES) {
+        throw new AttachmentError(
+          `file uploads exceed the ${String(DEFAULT_MAX_MESSAGE_FILE_BYTES)}-byte message limit`,
+          'FILES_TOO_LARGE',
+        )
+      }
+      const cwd = agent.session.header.cwd ?? this.defaultCwd
+      const uploadDir = join(cwd, PROMPT_FILE_UPLOAD_DIR)
+      try {
+        await mkdir(uploadDir, { recursive: true })
+        await writeFile(
+          join(uploadDir, '.gitignore'),
+          '*\n',
+          { flag: 'wx' },
+        ).catch(() => undefined) // an existing .gitignore is left untouched
+      } catch (error) {
+        throw new AttachmentError(
+          'unable to prepare the workspace upload directory',
+          'FILE_IMPORT_FAILED',
+          { cause: error },
+        )
+      }
+      let nextFile = 0
+      const imported: PromptContentPart[] = []
+      for (const part of content) {
+        if (part.type !== 'file') {
+          imported.push(part)
+          continue
+        }
+        const bytes = decoded[nextFile]
+        nextFile += 1
+        if (bytes === undefined) continue
+        const target = await uniqueUploadPath(uploadDir, sanitizeUploadName(part.name))
+        try {
+          await writeFile(target, bytes)
+        } catch (error) {
+          throw new AttachmentError(
+            `unable to save file "${part.name}" into the workspace`,
+            'FILE_IMPORT_FAILED',
+            { cause: error },
+          )
+        }
+        const relative = `${PROMPT_FILE_UPLOAD_DIR}/${baseNameOf(target)}`
+        const mention = formatFileMention({ path: relative, kind: 'file' }, false)
+        imported.push({ type: 'text', text: mention ?? `@${relative}` })
+      }
+      return imported
+    }
+    const chained = this.fileImportChain.then(run, run)
+    this.fileImportChain = chained.catch(() => undefined)
+    return chained
   }
 
   /**
@@ -594,4 +700,44 @@ function canonicalClientTimeZone(value: string): string | undefined {
 
 function routeServed(ctx: Context, provider: string): boolean {
   return ctx.llm.listProviders().some(entry => entry.id === provider)
+}
+
+/** Decode one canonical base64 upload, rejecting non-canonical forms. */
+function decodeUpload(data: string): Uint8Array {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(data) || data.length % 4 !== 0) {
+    throw new AttachmentError('file upload is not canonical base64', 'FILE_IMPORT_FAILED')
+  }
+  return Buffer.from(data, 'base64')
+}
+
+/** Reduce a browser file name to a safe single path segment. */
+function sanitizeUploadName(raw: string): string {
+  const segment = basename(raw.split(/[\\/]/u).pop() ?? '')
+    .replace(/[\u0000-\u001f\u007f"]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 128)
+  if (segment === '' || segment === '.' || segment === '..') return 'uploaded-file'
+  return segment
+}
+
+/** Pick a not-yet-existing destination for one upload name in a directory. */
+async function uniqueUploadPath(dir: string, name: string): Promise<string> {
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const suffix = dot > 0 ? name.slice(dot) : ''
+  let candidate = name
+  for (let index = 1; ; index += 1) {
+    try {
+      await stat(join(dir, candidate))
+    } catch {
+      return join(dir, candidate)
+    }
+    candidate = `${stem}-${String(index)}${suffix}`
+  }
+}
+
+/** Final path segment of one written upload destination. */
+function baseNameOf(target: string): string {
+  return basename(target)
 }

@@ -41,6 +41,7 @@ const SHARED_VIEW_PROPERTIES = {
   scheduledAt: { type: 'string', required: true },
   state: { type: 'string', required: true, enum: ['scheduled', 'overdue'] },
   deliveryMode: { type: 'string', required: true, const: 'session-local' },
+  idlePriority: { type: 'boolean', required: true },
 } as const
 
 const AFTER_VIEW_SCHEMA = {
@@ -255,12 +256,14 @@ function validateCreateArgs(args: {
   after_seconds?: number
   at?: AtInput
   every_seconds?: number
+  idle_priority?: boolean
 }): ScheduleToolError | undefined {
   const keys = Object.keys(args as unknown as Record<string, unknown>)
   if (keys.some(key => key !== 'prompt'
     && key !== 'after_seconds'
     && key !== 'at'
-    && key !== 'every_seconds')
+    && key !== 'every_seconds'
+    && key !== 'idle_priority')
     || Number(args.after_seconds !== undefined)
     + Number(args.at !== undefined)
     + Number(args.every_seconds !== undefined) !== 1) {
@@ -346,6 +349,10 @@ export function registerScheduleTools(
             },
           ],
         },
+        idle_priority: {
+          type: 'boolean',
+          description: 'When true, defer execution to an agent idle window instead of firing at the exact target. The task queues and dispatches when the session is idle.',
+        },
       },
       output: { schema: CREATE_OUTPUT_SCHEMA, render: renderValue },
       async execute(args, exec): Promise<ScheduleCreateValue> {
@@ -362,15 +369,16 @@ export function registerScheduleTools(
           let record: ScheduleRecord
           try {
             if (args.at !== undefined) {
-              record = createAtScheduleRecord(id, args.prompt, args.at, Date.now())
+              record = createAtScheduleRecord(id, args.prompt, args.at, Date.now(), args.idle_priority === true)
             } else if (args.after_seconds !== undefined) {
-              record = createAfterScheduleRecord(id, args.prompt, args.after_seconds, Date.now())
+              record = createAfterScheduleRecord(id, args.prompt, args.after_seconds, Date.now(), args.idle_priority === true)
             } else {
               record = createEveryScheduleRecord(
                 id,
                 args.prompt,
                 args.every_seconds as number,
                 Date.now(),
+                args.idle_priority === true,
               )
             }
           } catch (error: unknown) {

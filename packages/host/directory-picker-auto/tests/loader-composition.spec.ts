@@ -216,14 +216,19 @@ describe('real Loader composition', () => {
     expect(picker.capability().kind).toBe('browse')
   })
 
-  it('mounts the browse backend for an all-interfaces bind even on an attended host', { timeout: 60_000 }, async () => {
+  it('mounts the native backend for an all-interfaces bind on an attended host', { timeout: 60_000 }, async () => {
     stubAttendedHost()
     const { ctx } = await loadComposition('0.0.0.0')
 
-    expect(entryNames(ctx)).toContain(BROWSE)
-    expect(entryNames(ctx)).toContain(BROWSE_SURFACE)
-    expect(entryNames(ctx)).not.toContain(NATIVE)
-    expect(entryNames(ctx)).not.toContain(NATIVE_SURFACE)
+    // The Web transport pins host.pickDirectory to loopback, so an
+    // all-interfaces listener does not expose the desktop dialog to LAN
+    // browsers; the attended-host display signals decide the backend.
+    expect(entryNames(ctx)).toContain(NATIVE)
+    expect(entryNames(ctx)).toContain(NATIVE_SURFACE)
+    expect(entryNames(ctx)).not.toContain(BROWSE)
+    expect(entryNames(ctx)).not.toContain(BROWSE_SURFACE)
+    const picker = ctx.get('directoryPicker') as DirectoryPicker
+    expect(picker.capability().kind).toBe('native')
   })
 
   it('unmounts the backend when the surface entry fails to load', { timeout: 60_000 }, async () => {

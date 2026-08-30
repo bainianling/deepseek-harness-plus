@@ -1,14 +1,16 @@
 /**
  * Agent-preset surface plugin, browser half — four surfaces over one roster:
  * a General-settings row for the default preset, a chip on the new-session
- * screen for the session about to start, a read-only label in the session
- * header, and a settings section that manages the roster (copy, delete,
- * default, and the way into a preset's own files).
+ * screen for the session about to start, a picker in the session header that
+ * swaps a started session's preset between turns, and a settings section that
+ * manages the roster (copy, delete, default, and the way into a preset's own
+ * files).
  *
- * A running session keeps the composition it began with (the host refuses to
- * adopt an existing session under a different preset). That is what splits
- * the choice from the display: the General row and the hero chip are both
- * before-the-fact, while the header only reports what a session already runs.
+ * The host recomposes an agent only between turns: a blank or settled session
+ * accepts `agentPreset.select`, while a turn still running answers
+ * `agent-preset-locked`. That is what splits the choice from the display — the
+ * General row and the hero chip are before-the-fact staging for sessions that
+ * do not exist yet, while the header picker commits onto the session that is.
  */
 
 // Type-only: pulls the Session Controller service merge (ctx.sessions).
@@ -120,6 +122,13 @@ export function apply(ctx: ClientContext): void {
     const labelInjected = (): AgentPresetLabelInjected => ({
       hooks: { agentPresets: controller.store },
       load: () => controller.load(),
+      // The header's between-turns swap: commit through the host; the
+      // committed composition reaches every tab through the session
+      // projection's agent-preset event, so no local fold is needed.
+      switchPreset: async (sessionId, agentPreset) => {
+        const result = await scope.remote.agentPresets.select(sessionId as never, agentPreset)
+        if (!result.ok) throw new Error(result.error.message)
+      },
     })
 
     scope.effect(() => {

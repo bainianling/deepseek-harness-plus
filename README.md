@@ -1,63 +1,115 @@
-# DeepSeek Harness
+# DeepSeek Harness Plus（二改增强版）
 
-English | [中文](README.zh.md)
+> **本仓库是个人二次修改版（Modified Fork），不是 DeepSeek 官方项目。**
+> 原版来源：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)，
+> 基线提交：`cd5ef8148158c3a752a658978873241fdf8e2bbc`（release `0.1.2-alpha.1`）。
+> 原版采用 [MIT License](LICENSE)（Copyright (c) 2026 DeepSeek），本仓库沿用 MIT 许可证并保留原始版权声明。
+> 使用前请务必阅读 [免责声明](DISCLAIMER.md)。
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+[English summary](#english-summary)
 
-It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+---
 
-Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+## 这是什么
 
-## Developer preview
+DeepSeek Harness（`dsh`）是 DeepSeek 开源的「一切皆插件」Agent 运行框架（基于 [Cordis](https://github.com/cordiverse/cordis)），
+自带 Web GUI、CLI、Headless、ACP、Python SDK 等多种运行形态。
 
-DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+本仓库在官方 `0.1.2-alpha.1` 版本之上做了大量二次修改，核心目标是：**把 Web GUI 从一个聊天界面扩展成一个多功能工作台**，
+新增了一批应用级功能分区（AI 实时新闻、技能市场、知识库、模型测试台、LoRA 训练工作室、虚拟软件公司、声线克隆、内置浏览器、内置终端、自动化任务等），
+并补充了壁纸、局域网共享开关、会话内切换 Agent preset、跨工作区移动对话、停止服务按钮、破甲（jailbreak）红队模式等增强。
 
-Review the [safety notice](SAFETY.md) before running the project.
+完整修改清单（含每一项的文件路径与规模统计）见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
-## Run
+## 功能总览
 
-### Run from `npm`
+### 新增：Web GUI 应用级功能分区
 
-Install `Node.js`, then run:
+| 分区 | 功能 | 主要实现 |
+| --- | --- | --- |
+| 📰 **AI 实时新闻** | 聚合 B 站、抖音、小红书、X（Twitter）热榜与多个 RSS 源（量子位、OpenAI News、The Verge AI、DeepMind、Hugging Face、MIT Tech Review 等），支持代理抓取与自动翻译 | `packages/web/ai-news/`、`NewsPanel` |
+| 🧩 **技能市场** | 只读公共开发者工具目录（skill / MCP / dsh-plugin），展示元数据、安装命令与风险评级；市场本身不安装、不执行任何内容 | `packages/bundle/web-app/src/market.ts`、`SkillMarketApp` |
+| 📚 **知识库** | 只读对接本地 Hindsight 记忆库的知识中心：文件夹/知识页树、检索与可视化浏览 | `packages/bundle/web-app/src/knowledge.ts`、`KnowledgeHubApp` |
+| 🧪 **模型测试台** | 同一提示词并发投喂多个模型路由，对比输出、时延与用量的 bench 工作台 | `packages/web/model-bench/`、`ModelBenchApp` |
+| 🎨 **LoRA 训练工作室** | 封装本机 LoRA 训练服务（`127.0.0.1:8918`，kohya sd-scripts）：底模管理 / 素材打标（WD14）/ 训练监控（loss 曲线、样图预览）/ 模型库与合并，四个工作台页签 | `LoraTrainApp` |
+| 🏢 **虚拟软件公司（Collab Studio）** | 多智能体协作分区：以「软件公司」角色分工编排多个 Agent 协同完成任务 | `packages/web/collab-studio/`、`CollabStudioApp` |
+| 🎙️ **声线克隆** | 对接本机 IndexTTS 语音服务（默认 `127.0.0.1:8917`，可在浏览器 localStorage 覆盖）的 TTS 工作台，附语音助手悬浮入口 | `VoiceCloneApp`、`VoiceAssistant` |
+
+### 新增：系统与界面增强
+
+| 功能 | 说明 | 主要实现 |
+| --- | --- | --- |
+| 🖥️ **内置浏览器面板** | GUI 右侧集成无头浏览器面板（截图、页面状态、快照浏览） | `packages/client/ui-browser-panel/` |
+| ⌨️ **内置终端** | Web 内共享 Shell 终端（host 侧持久 PTY 通道） | `packages/api/session-controller/src/terminal.ts`、`TerminalApp` |
+| ⏰ **自动化任务面板** | 侧边栏自动化任务入口与调度（schedule）管理面板 | `ui-sidebar/AutomationPanel` |
+| 🖼️ **壁纸更换** | 静态 + 动态壁纸层与壁纸选择器 | `ui-primitives/Wallpaper*` |
+| 🛑 **停止服务按钮** | 设置页一键停止 dsh web 服务（host 侧 shutdown API，Windows 进程树处理） | `StopServerAction`、`shutdown-route.spec.ts` |
+| 📡 **局域网共享开关** | 会话输入栏的 LAN 共享控制（受信主机 / 绑定地址场景） | `LanShareControl` |
+| 🔁 **会话内切换 Agent preset** | 会话级 preset 标签与切换，配套 host 侧 preset API | `ui-agent-preset/`、`host/apiproxy` |
+| 🗂️ **跨工作区移动对话 / 工作区浏览** | 工作区浏览器与对话迁移 | `client/runtime/workspaces/`、`WorkspaceBrowser` |
+| 📥 **会话文件导入** | 导入外部会话文件（JSONL）到会话存储 | `session-file-import` |
+| 🗑️ **会话删除** | SQLite/JSONL 持久层的会话与事件删除 SQL 及接口 | `session-persistence-sqlite` |
+| 🖼️ **图片导入输入** | 输入栏图片导入（ComposerImageImport）与附件栏调整 | `ui-attachment/` |
+| 💰 **模型余额入口** | 模型选择器旁的余额 / 用量快捷入口 | `ModelBalanceAction` |
+| 🎨 **主题细节** | 滚动条、渐变阴影文字、平台化设计变量等样式增强 | `ui-theme/` |
+
+### 新增：破甲（Jailbreak）红队模式
+
+用于**红队安全评估**的实验性功能：新增 `jailbreak` agent preset 与 `packages/jailbreak/jailbreak-mode` 插件，
+对所有模型请求自动注入可选策略的破甲指令（内置 `authorized-ctf`、`tvd-guard` 等策略，`/jailbreak` 命令切换），
+并在 GUI 提供策略芯片（`ui-jailbreak`）。⚠️ 仅限授权安全评估场景使用，详见 [免责声明](DISCLAIMER.md)。
+
+### 其它修改
+
+- 依赖调整：`react`/`react-dom` 提为根级依赖、`lightningcss` 锁版等（`package.json`、`pnpm-lock.yaml`）。
+- 文档：新增 `docs/subsystems/jailbreak*`，更新 persistence / web-server / workspace / config-catalog 等（中英双语）。
+- 压缩（compaction）、`llm-pi-ai` 适配器、系统提示词、已知事件类型等处的配套修改。
+- 完整清单见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+
+## 快速开始
+
+> 前置：Node.js `^22.19.0 || >=24.0.0` 与 pnpm。
 
 ```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
-
-### Run from source
-
-To run from a repository checkout:
-
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/bainianling/deepseek-harness-plus.git
+cd deepseek-harness-plus
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm dsh web        # 打开 http://127.0.0.1:3080
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+模型凭据按原版方式提供（环境变量 `DEEPSEEK_API_KEY`、`$DSH_HOME/.credentials.yaml` 或 GUI 引导），详见原版文档。
 
-## Community and support
+部分功能分区依赖**额外的本机服务**，需自行准备（本仓库不包含这些服务本身）：
 
-- Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+| 功能 | 依赖 |
+| --- | --- |
+| LoRA 训练工作室 | 本机 `127.0.0.1:8918` 的 LoRA 训练服务（kohya sd-scripts 封装） |
+| 声线克隆 | 本机 `127.0.0.1:8917` 的 IndexTTS 语音服务（服务地址可在浏览器 localStorage `dsh.voiceServiceUrl` 覆盖） |
+| 知识库 | 本机运行的 Hindsight 记忆库及其投影配置 |
+| AI 实时新闻 | 访问各平台热榜的网络条件（可配置代理与翻译服务端点） |
 
-## Contributing
+## 许可证与来源
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+- 原版：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)，MIT License，Copyright (c) 2026 DeepSeek。
+- 本仓库沿用 [MIT License](LICENSE)；相对原版的修改说明见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+- 本项目与 DeepSeek 无任何隶属或背书关系。免责声明见 [DISCLAIMER.md](DISCLAIMER.md)。
 
-## Development
+---
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+## English summary
 
-For agents, follow [AGENTS.md](AGENTS.md).
+This is a **personal modified fork** of [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
+(baseline commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`, release `0.1.2-alpha.1`, MIT License).
+It is **not** an official DeepSeek product.
 
-## License
+On top of the upstream agent harness, this fork extends the Web GUI into a multi-function workbench:
+AI news aggregation, a read-only skill marketplace, a Hindsight knowledge-center view, a multi-model
+benchmark bench, a LoRA training studio (local kohya-based service), a multi-agent "virtual software
+company" studio, voice cloning against a local IndexTTS service, a built-in browser panel and terminal,
+automation scheduling, wallpapers, LAN-share control, per-session agent preset switching, cross-workspace
+conversation moves, a stop-server action, session import/delete, and an experimental jailbreak preset
+intended **only** for authorized red-team security evaluation. See [MODIFICATIONS.md](MODIFICATIONS.md)
+for the full change list and [DISCLAIMER.md](DISCLAIMER.md) for the disclaimer.
 
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Quick start: `pnpm install && pnpm run build && pnpm dsh web` (Node.js `^22.19.0 || >=24.0.0`, pnpm required).

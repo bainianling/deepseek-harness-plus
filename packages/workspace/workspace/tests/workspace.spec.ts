@@ -11,9 +11,11 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import WorkspaceRegistry, {
+  WorkspaceAdoptInvalidError,
   WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
+  WorkspaceUnknownSessionError,
 } from '../src/index.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 
@@ -134,6 +136,7 @@ function record(path: string, sessionIds: string[], createdAt = '2026-07-24T00:0
     path,
     title: basename(path),
     sessionIds: sessionIds.map(SessionId),
+    adoptedSessionIds: [],
     createdAt,
     updatedAt: createdAt,
   }
@@ -723,6 +726,132 @@ describe('Workspace session ordering', () => {
     const attached = workspace.attachSession(SessionId('s1'))
     await Promise.all([detached, attached])
     expect(workspace.sessionIds).toEqual(['s1'])
+  })
+
+})
+
+describe('cross-workspace session moves', () => {
+  it('moves a session into a workspace whose path differs from its cwd, durably', async () => {
+    const home = await makeDir('move-home')
+    const away = await makeDir('move-away')
+    const result = await harness()
+    result.setSessions([header('s1', home, 1)])
+    const source = await result.registry.create(home)
+    const target = await result.registry.create(away)
+    await source.attachSession(SessionId('s1'))
+    expect(source.sessionIds).toEqual(['s1'])
+
+    const moved = await result.registry.moveSession(SessionId('s1'), target.id)
+    expect(moved).toBe(target)
+    // The cwd names the SOURCE workspace, yet the explicit move accounts the
+    // session in the TARGET: adoption is user intent, not a derived fact.
+    expect(target.sessionIds).toEqual(['s1'])
+    expect(source.sessionIds).toEqual([])
+    const targetStored = storedRecord(result.pool, target.id)
+    expect(targetStored.sessionIds).toEqual(['s1'])
+    expect(targetStored.adoptedSessionIds).toEqual(['s1'])
+    expect(storedRecord(result.pool, source.id).sessionIds).toEqual([])
+  })
+
+  it('lands an adopted member before a target-accounted anchor', async () => {
+    const away = await makeDir('adopt-anchor-away')
+    const home = await makeDir('adopt-anchor-home')
+    const result = await harness()
+    result.setSessions([
+      header('moved', home, 1),
+      header('a1', away, 2),
+      header('a2', away, 3),
+    ])
+    const source = await result.registry.create(home)
+    const target = await result.registry.create(away)
+    await source.attachSession(SessionId('moved'))
+    await target.attachSession(SessionId('a1'))
+    await target.attachSession(SessionId('a2'))
+
+    await result.registry.moveSession(SessionId('moved'), target.id, SessionId('a2'))
+    expect(target.sessionIds).toEqual(['moved', 'a2', 'a1'])
+    expect(source.sessionIds).toEqual([])
+  })
+
+  it('reorders within one workspace when source and target are the same', async () => {
+    const dir = await makeDir('move-same')
+    const result = await harness()
+    result.setSessions([header('s1', dir, 1), header('s2', dir, 2), header('s3', dir, 3)])
+    const workspace = await result.registry.create(dir)
+    await workspace.attachSession(SessionId('s1'))
+    await workspace.attachSession(SessionId('s2'))
+    await workspace.attachSession(SessionId('s3'))
+    expect(workspace.sessionIds).toEqual(['s3', 's2', 's1'])
+
+    await result.registry.moveSession(SessionId('s3'), workspace.id, SessionId('s1'))
+    expect(workspace.sessionIds).toEqual(['s2', 's3', 's1'])
+    // A cwd-matching member never needs the adopted mark.
+    expect(storedRecord(result.pool, workspace.id).adoptedSessionIds).toEqual([])
+  })
+
+  it('rejects an unaccounted anchor before any write, leaving the session grouped', async () => {
+    const home = await makeDir('anchor-invalid-home')
+    const away = await makeDir('anchor-invalid-away')
+    const result = await harness()
+    result.setSessions([header('s1', home, 1), header('s2', away, 2)])
+    const source = await result.registry.create(home)
+    const target = await result.registry.create(away)
+    await source.attachSession(SessionId('s1'))
+    await target.attachSession(SessionId('s2'))
+    const written = result.changes.length
+
+    await expect(result.registry.moveSession(SessionId('s1'), target.id, SessionId('ghost')))
+      .rejects.toBeInstanceOf(WorkspaceAdoptInvalidError)
+    // The detach pass never ran: the session stays where it was.
+    expect(source.sessionIds).toEqual(['s1'])
+    expect(target.sessionIds).toEqual(['s2'])
+    expect(result.changes).toHaveLength(written)
+  })
+
+  it('rejects unknown targets and unknown sessions without writing', async () => {
+    const dir = await makeDir('move-unknown')
+    const result = await harness()
+    result.setSessions([header('s1', dir, 1)])
+    const workspace = await result.registry.create(dir)
+    await workspace.attachSession(SessionId('s1'))
+    const ghost = WorkspaceId('00000000-0000-4000-8000-0000000000ff')
+    const written = result.changes.length
+
+    await expect(result.registry.moveSession(SessionId('s1'), ghost))
+      .rejects.toBeInstanceOf(WorkspaceOrderInvalidError)
+    await expect(result.registry.moveSession(SessionId('ghost'), workspace.id))
+      .rejects.toBeInstanceOf(WorkspaceUnknownSessionError)
+    expect(workspace.sessionIds).toEqual(['s1'])
+    expect(result.changes).toHaveLength(written)
+  })
+
+  it('keeps an adopted member accounted across restart while its cwd still names another workspace', async () => {
+    const home = await makeDir('adopt-restart-home')
+    const away = await makeDir('adopt-restart-away')
+    const sourceId = WorkspaceId('00000000-0000-4000-8000-00000000000a')
+    const targetId = WorkspaceId('00000000-0000-4000-8000-00000000000b')
+    const createdAt = '2026-07-24T00:00:00.000Z'
+    const pool = new MemoryMediaPool()
+    pool.versions.set('workspace', DOMAIN_VERSION)
+    pool.media.set('workspace', {
+      tables: new Map([['workspaces', new Map<string, unknown>([
+        // The state a committed move leaves: detached from the source, and
+        // the target holds the id with its adopted mark.
+        [sourceId, record(home, [], createdAt)],
+        [targetId, {
+          ...record(away, ['s1'], createdAt),
+          adoptedSessionIds: [SessionId('s1')],
+        }],
+      ])]]),
+      global: { initialized: true, workspaceIds: [sourceId, targetId], archivedSessionIds: [] },
+    })
+
+    const result = await harness({ pool, sessions: [header('s1', home)] })
+    const target = result.registry.get(targetId)!
+    // The header cwd names the source workspace, yet the adopted membership
+    // keeps the session in the target — across restarts, not just in memory.
+    expect(target.sessionIds).toEqual(['s1'])
+    expect(result.registry.get(sourceId)!.sessionIds).toEqual([])
   })
 
 })

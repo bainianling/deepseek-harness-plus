@@ -205,6 +205,20 @@
     - id: subprocess
       name: '@deepseek-ai/dsh-subprocess-local'
 
+    # Process-global PTY registry and the local interactive shell backend. Sessions
+    # remain exact-Agent scoped inside the registry; Web UI and model tools share
+    # this provider without sharing terminal authority across conversations.
+    - id: terminals
+      name: '@deepseek-ai/dsh-terminal'
+
+    - id: terminal-shell
+      name: '@deepseek-ai/dsh-terminal-bash'
+      config:
+        # Quoted: an unquoted plain scalar may not contain `: `, and js-yaml
+        # would read `? ... : ...` as a complex mapping key ({"[object Object]": ...}).
+        shellDialect: !!js "process.platform === 'win32' ? 'pwsh' : 'bash'"
+        timeoutMs: 300000
+
     # Every shipped CLI mode starts with the same file-effect boundary.
     # The environment remains an explicit deployment override; otherwise fresh
     # sessions pin workspace-write + ask through the permission service below.
@@ -319,6 +333,12 @@
               Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
 
               When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+    # Jailbreak (red-team safety evaluation) mode: logged per-agent state that
+    # injects a strategy's system block and wraps claimed user messages while
+    # active. Optional at deployment; removing this row removes the mode.
+    - id: jailbreak-mode
+      name: '@deepseek-ai/dsh-jailbreak-mode'
 
     - id: token-meter
       name: '@deepseek-ai/dsh-token-meter'

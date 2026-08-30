@@ -78,6 +78,26 @@ describe('SystemPrompt tool order', () => {
     expect(assembly.tools.map(t => t.description)).toEqual(['anchor', 'first', 'second'])
   })
 
+  it('canonicalizes object keys inside tool schemas without reordering semantic arrays', async () => {
+    const ctx = await mount()
+    ctx.systemPrompt.tools(() => ({
+      schemas: [{
+        name: 'schema',
+        description: 'schema',
+        parameters: {
+          type: 'object',
+          properties: { zulu: { type: 'string' }, alpha: { type: 'string' } },
+          required: ['zulu', 'alpha'],
+        },
+      }],
+    }))
+
+    const [schema] = (await ctx.systemPrompt.assemble()).tools
+    expect(JSON.stringify(schema?.parameters)).toBe(
+      '{"properties":{"alpha":{"type":"string"},"zulu":{"type":"string"}},"required":["zulu","alpha"],"type":"object"}',
+    )
+  })
+
   it('canonicalizes BEFORE the assemble waterfall: listeners see the ordered list and own their own edits', async () => {
     const ctx = await mount()
     ctx.systemPrompt.tools(() => ({ schemas: [tool('zulu'), tool('alpha')] }))

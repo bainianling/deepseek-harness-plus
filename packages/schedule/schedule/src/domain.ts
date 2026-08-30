@@ -649,6 +649,7 @@ export function createAfterScheduleRecord(
   prompt: string,
   afterSeconds: number,
   now: number,
+  idlePriority?: boolean,
 ): AfterScheduleRecord {
   const normalizedPrompt = prompt.trim()
   if (normalizedPrompt.length === 0) {
@@ -665,6 +666,7 @@ export function createAfterScheduleRecord(
     prompt: normalizedPrompt,
     afterSeconds,
     scheduledAt: futureInstant(target, now),
+    ...(idlePriority ? { idlePriority: true } : {}),
   })
 }
 
@@ -681,6 +683,7 @@ export function createAtScheduleRecord(
   prompt: string,
   at: AtInput,
   now: number,
+  idlePriority?: boolean,
 ): AtScheduleRecord {
   const normalizedPrompt = prompt.trim()
   if (normalizedPrompt.length === 0) {
@@ -716,6 +719,7 @@ export function createAtScheduleRecord(
     kind: 'at',
     prompt: normalizedPrompt,
     scheduledAt: futureInstant(target, now),
+    ...(idlePriority ? { idlePriority: true } : {}),
   })
 }
 
@@ -732,6 +736,7 @@ export function createEveryScheduleRecord(
   prompt: string,
   everySeconds: number,
   now: number,
+  idlePriority?: boolean,
 ): EveryScheduleRecord {
   const normalizedPrompt = prompt.trim()
   if (normalizedPrompt.length === 0) {
@@ -754,6 +759,7 @@ export function createEveryScheduleRecord(
     prompt: normalizedPrompt,
     everySeconds,
     scheduledAt: futureInstant(target, now),
+    ...(idlePriority ? { idlePriority: true } : {}),
   })
 }
 
@@ -768,6 +774,7 @@ export function scheduleView(record: ScheduleRecord, now: number): ScheduleView 
     ...record,
     state: now >= Date.parse(record.scheduledAt) ? 'overdue' : 'scheduled',
     deliveryMode: 'session-local',
+    idlePriority: record.idlePriority === true,
   })
 }
 

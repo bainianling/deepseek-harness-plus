@@ -47,7 +47,7 @@ async function mounted(withServices: boolean): Promise<{
       readImage: async () => { throw new Error('fixture has no images') },
     } as never)
   }
-  const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+  const connection = new HostConnectionService(ctx, () => [], {} as BrowserAuth)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber
   return { connection, dispose: () => fiber.dispose() }

@@ -76,6 +76,15 @@ The browser HTTP carrier service. Activation listens immediately. Route registra
 register(route: WebRoute): () => void
 
 /**
+ * Register a request guard before every route and fallback. A guard denying
+ * the request receives no application response, so a long-lived listener can
+ * withdraw LAN access without restarting its socket.
+ * @param guard - returns true only when this request may reach the route table.
+ * @returns the disposer removing the guard.
+ */
+guard(guard: (req: IncomingMessage) => boolean): () => void
+
+/**
  * Register an exact-path HTTP upgrade route. Duplicate paths throw because
  * one socket can have only one protocol owner.
  * @param route - pathname and handler owning negotiation plus socket use.

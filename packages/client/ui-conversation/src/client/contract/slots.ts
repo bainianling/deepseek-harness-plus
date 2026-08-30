@@ -22,11 +22,13 @@ import type { ComposerSubmitGesture, InputSubmitMode } from './composer-submissi
 import type { ConversationSnapshot } from './snapshot.ts'
 import type { ViewTab } from './views.ts'
 
-/** Browser-owned image that has not crossed the durable Host boundary. */
+/** Browser-owned attachment that has not crossed the durable Host boundary. */
 export interface ComposerAttachment {
-  kind: 'image'
+  /** `image` rides the model image channel; `file` lands in the Session workspace. */
+  kind: 'image' | 'file'
   id: DraftAttachmentId
   file: File
+  /** Object-URL preview for images; empty for plain files. */
   previewUrl: string
   /** Intrinsic pixel width, filled asynchronously by the intake header probe. */
   width?: number
@@ -141,8 +143,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session-maybe'
       owner: ComposerAttachmentsOwnerProps
     }
+    /** Optional image-file picker immediately after the command launcher in the composer tool row. */
+    'conversation.input.image-import': {
+      kind: 'single'
+      scope: 'session-maybe'
+      owner: ComposerAttachmentsOwnerProps
+    }
     /** Plan control inside the composer tool row. */
     'conversation.input.plan': { kind: 'single'; scope: 'session'; owner: InputControlOwnerProps }
+    /** Jailbreak control inside the composer tool row. */
+    'conversation.input.jailbreak': { kind: 'single'; scope: 'session'; owner: InputControlOwnerProps }
     /** Model selector inside the composer tool row. */
     'conversation.input.model': { kind: 'single'; scope: 'session'; owner: InputControlOwnerProps }
   }
@@ -292,7 +302,11 @@ export interface InputControlOwnerProps {
 export type ComposerBarProps =
   PropsRuntime<'conversation.composer.bar'>
   & PropsRenderSlots<
-    'conversation.input.attachments' | 'conversation.input.plan' | 'conversation.input.model'
+    | 'conversation.input.attachments'
+    | 'conversation.input.image-import'
+    | 'conversation.input.plan'
+    | 'conversation.input.jailbreak'
+    | 'conversation.input.model'
   >
   & InjectFace<ComposerBarInjected>
   & PropsLocale<'conversation'>

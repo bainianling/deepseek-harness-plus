@@ -14,9 +14,11 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, assertNever } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import { installSettingsSection } from '@deepseek-ai/dsh-settings'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import {
+  applyRuntimeOverride,
   resolveCompactSpec,
   resolveConfig,
   resolveTargetPolicy,
@@ -29,9 +31,16 @@ import {
 } from './region.ts'
 import { summarizeWithLlm } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
+import {
+  COMPACTION_SETTINGS_NAMESPACE,
+  COMPACTION_SETTINGS_SCHEMA,
+  normalizeRuntimeOverride,
+} from './settings.ts'
+import type { CompactionRuntimeOverride } from './settings.ts'
 import type {
   BasicCompactionConfig,
   ModelCompactPolicyConfig,
+  ResolvedCompactSpec,
   ResolvedConfig,
 } from './types.ts'
 
@@ -44,6 +53,21 @@ export type {
   ResolvedRetention,
   ResolvedTargetPolicy,
 } from './types.ts'
+export {
+  COMPACTION_SETTINGS_NAMESPACE,
+  COMPACTION_SETTINGS_SCHEMA,
+  normalizeRuntimeOverride,
+} from './settings.ts'
+export type { CompactionRuntimeOverride } from './settings.ts'
+
+/**
+ * Process-wide user override shared by every mounted engine instance. The
+ * settings namespace installs once — presets mount this plugin per scope, and
+ * a second registration of one namespace fails — so sibling instances read
+ * this holder instead of owning their own section.
+ */
+const runtimeOverride: { current: CompactionRuntimeOverride } = { current: {} }
+let settingsInstalled = false
 
 /** The region transaction's view of this service's dynamically dispatched summarizer. */
 type RegionSummarize = (input: SummarizationInput, agent: Agent, signal?: AbortSignal) => Promise<SummaryResult>
@@ -71,6 +95,7 @@ function conversationTarget(
 }
 
 const thresholdRatioSchema = z.number()
+const thresholdTokensSchema = z.number().step(1).min(1)
 const retainRatioSchema = z.number()
 const retainTokensSchema = z.number().step(1).min(0)
 const summarizationProviderSchema = z.string()
@@ -83,6 +108,7 @@ const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
   provider: z.string().required(),
   model: z.string().required(),
   thresholdRatio: thresholdRatioSchema,
+  thresholdTokens: thresholdTokensSchema,
   retainRatio: retainRatioSchema,
   retainTokens: retainTokensSchema,
   summarizationProvider: summarizationProviderSchema,
@@ -105,6 +131,7 @@ export class BasicCompactionEngine extends CompactionEngine {
 
   static Config: z<BasicCompactionConfig> = z.object({
     thresholdRatio: thresholdRatioSchema,
+    thresholdTokens: thresholdTokensSchema,
     retainRatio: retainRatioSchema,
     retainTokens: retainTokensSchema,
     summarizationProvider: summarizationProviderSchema,
@@ -126,7 +153,49 @@ export class BasicCompactionEngine extends CompactionEngine {
   constructor(ctx: Context, config: BasicCompactionConfig = {}) {
     super(ctx)
     this.config = resolveConfig(config)
+    this._installSettingsOverride()
     if (this.config.auto) this._registerAutomaticCompaction()
+  }
+
+  /**
+   * Expose the user-owned context-length override as a settings section and
+   * mirror it into the process-wide holder. Only the first mounted instance
+   * owns the namespace; siblings read the shared holder. A settings service
+   * behind another realm simply skips the wiring, leaving composed policy.
+   */
+  private _installSettingsOverride(): void {
+    if (settingsInstalled) return
+    settingsInstalled = true
+    const entry: CompactionRuntimeOverride = {}
+    installSettingsSection(
+      this.ctx,
+      COMPACTION_SETTINGS_NAMESPACE,
+      COMPACTION_SETTINGS_SCHEMA,
+      entry,
+      {
+        // The schema admits each budget independently; refuse a section whose
+        // own budgets already conflict so the stored value stays actionable.
+        validate: (value) => {
+          const override = normalizeRuntimeOverride(value)
+          if (override.thresholdTokens !== undefined && override.retainTokens !== undefined
+            && override.retainTokens >= override.thresholdTokens) {
+            throw new Error(
+              `compaction settings: retainTokens (${override.retainTokens}) must be `
+              + `less than thresholdTokens (${override.thresholdTokens})`,
+            )
+          }
+        },
+        setSource: (current) => {
+          runtimeOverride.current = normalizeRuntimeOverride(current())
+        },
+        onChange: () => {},
+      },
+    )
+  }
+
+  /** The latest user-owned override, normalized for policy overlay. */
+  private static currentRuntimeOverride(): CompactionRuntimeOverride {
+    return normalizeRuntimeOverride(runtimeOverride.current)
   }
 
   /**
@@ -262,7 +331,12 @@ export class BasicCompactionEngine extends CompactionEngine {
   ): Promise<CompactionResult | null> {
     const target = routedTarget(agent.session)
     if (target === undefined) return null
-    const policy = resolveTargetPolicy(this.config, target)
+    // Read through on every pressure decision so a committed settings change
+    // caps the next step without disturbing the turn in flight.
+    const policy = applyRuntimeOverride(
+      resolveTargetPolicy(this.config, target),
+      BasicCompactionEngine.currentRuntimeOverride(),
+    )
     const meter = this.ctx.tokenMeter
     let measurement = meter.measure(agent.session)
     switch (trigger) {
@@ -290,17 +364,25 @@ export class BasicCompactionEngine extends CompactionEngine {
       return this.compactRegion(range.start, range.end, agent, signal)
     }
 
-    const context = (await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)).context
+    // An absolute thresholdTokens policy is capacity-independent: it never
+    // consults model discovery, so it also works for routes whose adapter
+    // declares no contextWindow. A ratio threshold must scale by capacity.
     assertNoActiveCompaction(agent.session, 'automatic pressure compaction')
     const targetKey = `${target.provider}/${target.model}`
-    if (context === undefined) {
-      throw new TargetPressureConfigError(
-        targetKey,
-        `compaction-basic: no context capacity for ${targetKey}; `
-        + 'configure contextWindow on that adapter model',
-      )
+    let spec: ResolvedCompactSpec
+    if (policy.thresholdTokens !== undefined) {
+      spec = resolveCompactSpec(policy)
+    } else {
+      const context = (await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)).context
+      if (context === undefined) {
+        throw new TargetPressureConfigError(
+          targetKey,
+          `compaction-basic: no context capacity for ${targetKey}; `
+          + 'configure contextWindow on that adapter model or set an absolute thresholdTokens',
+        )
+      }
+      spec = resolveCompactSpec(policy, context.contextWindow)
     }
-    const spec = resolveCompactSpec(policy, context.contextWindow)
     if (measurement.totalTokens < spec.thresholdTokens) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a

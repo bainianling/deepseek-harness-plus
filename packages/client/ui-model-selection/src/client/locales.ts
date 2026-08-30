@@ -28,6 +28,11 @@ export const zh = {
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'sidebar.balance.loadingModel': '正在读取当前模型…',
+  'sidebar.balance.loading': '正在读取余额…',
+  'sidebar.balance.official': '余额 {balance}',
+  'sidebar.balance.unavailable': '余额不可用',
+  'sidebar.balance.providerUnavailable': '余额请在提供方控制台查看',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -53,4 +58,9 @@ export const en = {
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'sidebar.balance.loadingModel': 'Loading current model…',
+  'sidebar.balance.loading': 'Loading balance…',
+  'sidebar.balance.official': 'Balance {balance}',
+  'sidebar.balance.unavailable': 'Balance unavailable',
+  'sidebar.balance.providerUnavailable': 'View balance in the provider console',
 } satisfies Record<ModelKey, string>

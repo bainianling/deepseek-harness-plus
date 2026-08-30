@@ -127,7 +127,7 @@ export interface InputTriggerController {
   adjudicate(
     line: string,
     signal: AbortSignal,
-    envelope: { readonly images: number },
+    envelope: { readonly images: number; readonly files?: number },
   ): Promise<PickOutcome>
   /** @param source - source name. @param hit - synthetic trigger hit. */
   toggleSource(source: string, hit: InputTriggerHit): void

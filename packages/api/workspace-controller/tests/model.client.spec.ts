@@ -8,10 +8,13 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceDeleteValue,
   WorkspaceFollowFrame,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
+  WorkspaceMoveSessionRequest,
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
   WorkspaceValue,
@@ -85,6 +88,15 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     request: WorkspaceArchiveSessionRequest,
   ) => Promise<RemoteResult<WorkspaceArchiveValue>> = request =>
     Promise.resolve(remoteOk({ archivedSessionIds: [request.sessionId] }))
+  onMoveSession: (
+    request: WorkspaceMoveSessionRequest,
+  ) => Promise<RemoteResult<WorkspaceValue>> = request => Promise.resolve(remoteOk({
+    workspace: workspace(String(request.workspaceId), [request.sessionId]),
+  }))
+  onDeleteSession: (
+    _request: WorkspaceDeleteSessionRequest,
+  ) => Promise<RemoteResult<WorkspaceDeleteSessionValue>> = () =>
+    Promise.resolve(remoteOk({ deleted: true }))
 
   create(request: WorkspaceCreateRequest): Promise<RemoteResult<WorkspaceCreateValue>> {
     this.record('create', request)
@@ -114,6 +126,16 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
   archiveSession(request: WorkspaceArchiveSessionRequest): Promise<RemoteResult<WorkspaceArchiveValue>> {
     this.record('archiveSession', request)
     return this.onArchiveSession(request)
+  }
+
+  moveSession(request: WorkspaceMoveSessionRequest): Promise<RemoteResult<WorkspaceValue>> {
+    this.record('moveSession', request)
+    return this.onMoveSession(request)
+  }
+
+  deleteSession(request: WorkspaceDeleteSessionRequest): Promise<RemoteResult<WorkspaceDeleteSessionValue>> {
+    this.record('deleteSession', request)
+    return this.onDeleteSession(request)
   }
 
   async *follow(_signal?: AbortSignal): AsyncGenerator<WorkspaceFollowFrame> {}
@@ -380,5 +402,54 @@ describe('ClientWorkspaceModel', () => {
     expect(model.getSnapshot().items).toEqual([])
     model.removeView(wid('gone'))
     expect(model.getSnapshot().items).toEqual([])
+  })
+
+  it('merges a moveSession target row and omits the anchor when absent', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [workspace('source', [sid('moving')]), workspace('target')])
+
+    await expect(model.moveSession(wid('target'), sid('moving'))).resolves.toMatchObject({ ok: true })
+    expect(remote.calls).toContainEqual({
+      method: 'moveSession',
+      request: { workspaceId: 'target', sessionId: 'moving' },
+    })
+    expect(model.getSnapshot().items.find(item => item.workspaceId === 'target')?.sessionIds)
+      .toEqual(['moving'])
+
+    await expect(model.moveSession(wid('target'), sid('moving'), sid('anchor')))
+      .resolves.toMatchObject({ ok: true })
+    expect(remote.calls).toContainEqual({
+      method: 'moveSession',
+      request: { workspaceId: 'target', sessionId: 'moving', beforeSessionId: 'anchor' },
+    })
+
+    remote.onMoveSession = () => Promise.resolve(workspaceError({
+      code: 'workspace-move-invalid',
+      message: 'anchor is not accounted',
+      details: { workspaceId: wid('target'), sessionId: sid('moving') },
+    }))
+    await expect(model.moveSession(wid('target'), sid('moving'), sid('missing')))
+      .resolves.toMatchObject({ ok: false })
+  })
+
+  it('deletes a Session without mutating the projection locally', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [workspace('owner', [sid('gone')])], [sid('gone')])
+
+    await expect(model.deleteSession(sid('gone'))).resolves.toMatchObject({
+      ok: true, value: { deleted: true },
+    })
+    expect(remote.calls).toContainEqual({ method: 'deleteSession', request: { sessionId: 'gone' } })
+    expect(model.getSnapshot().items[0]?.sessionIds).toEqual(['gone'])
+    expect(model.getSnapshot().archivedSessionIds).toEqual(['gone'])
+
+    remote.onDeleteSession = () => Promise.resolve(workspaceError({
+      code: 'session-live', message: 'still open', details: { sessionId: sid('gone') },
+    }))
+    await expect(model.deleteSession(sid('gone'))).resolves.toMatchObject({
+      ok: false, error: { code: 'session-live' },
+    })
   })
 })

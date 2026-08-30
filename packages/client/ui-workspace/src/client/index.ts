@@ -121,8 +121,17 @@ export function apply(ctx: Context): void {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },
     archiveSession: async (sessionId) => { await uiWorkspace.archiveSession(sessionId) },
+    deleteSession: async (sessionId) => {
+      await workspaces.deleteSession(sessionId)
+      // A durably deleted session was never live, so no api-session/removed
+      // frame announces its removal: re-pull the list baseline to drop the row.
+      await sessions.refresh()
+    },
     insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
       await workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
+    },
+    moveSession: async (workspaceId, sessionId) => {
+      await workspaces.moveSession(workspaceId, sessionId)
     },
     createWorkspace: input => workspaces.create(input),
     hooks: { directoryFlow: browserFlowSource, connectionGeneration },

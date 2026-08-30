@@ -270,6 +270,21 @@ export abstract class SessionPersistence extends Service {
   abstract list(signal?: AbortSignal): Promise<SessionHeader[]>
 
   /**
+   * Durably remove one stored session: its events and its metadata cease to
+   * exist. Deleting an absent session is a no-op success, so callers that
+   * verified existence beforehand race nothing; deleting a session with a
+   * LIVE writer is the caller's error — the next append would re-materialize
+   * a partial log. Backends that cannot delete throw; callers must treat the
+   * rejection as "this deployment keeps every log", not as absence.
+   * @param _id - the persisted session to delete.
+   * @param signal - optional cancellation for backend deletion work.
+   */
+  async delete(_id: SessionId, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    throw new Error('this session persistence backend cannot delete sessions')
+  }
+
+  /**
    * List materialized sessions with cheap per-log change tokens.
    *
    * Repeated observations of an unchanged log return the same revision. A

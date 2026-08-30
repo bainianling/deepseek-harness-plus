@@ -26,6 +26,7 @@
   config:
     text: >-
       You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+      Work efficiently: reuse facts already established in the conversation, batch independent inspection, and do not repeat completed searches or plans. Once evidence is sufficient, implement the change, run focused verification, and report the result concisely. Never emit internal control markup such as <thinking>, <analysis>, or similar tags in user-visible commentary or final text; private reasoning belongs only in the provider reasoning channel.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -48,6 +49,11 @@
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
+
+# Persistent terminal controls share the Host PTY registry while every session
+# remains fenced to the exact Agent executing the tool.
+- id: tool-terminal
+  name: '@deepseek-ai/dsh-tool-terminal'
 
 # ── filesystem ──────────────────────────────────────────────────────────────
 
@@ -122,6 +128,19 @@
               Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
 
               When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── jailbreak mode (red-team safety evaluation) ──────────────────────────────
+
+# Jailbreak state is per-agent by nature, so an entry-local realm is not a
+# workaround here — it is the correct lifetime, exactly like plan mode.
+- id: jailbreak
+  name: cordis:group
+  group: true
+  isolate:
+    jailbreakMode: true
+  config:
+    - id: jailbreak-mode
+      name: '@deepseek-ai/dsh-jailbreak-mode'
 
 # ── compaction ──────────────────────────────────────────────────────────────
 

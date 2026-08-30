@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package provides the shell layout of the Web GUI: a three-column AppFrame with resizable sidebar and details panels, a concession chain that shrinks the details column and then auto-closes it when space runs out, and the `ctx.layout` panel-geometry service other plugins call to open or close the details column. It also seats the theme presenter, which projects the resolved color scheme, alias tokens, content font size, and `theme-color` metadata onto the document. Choose it for the standard window chrome; panel geometry is transient and resets on reload.
+This package provides the shell layout of the Web GUI: a three-column AppFrame with resizable sidebar and details panels, a concession chain that shrinks the details column and then auto-closes it when space runs out, and the `ctx.layout` panel-geometry service other plugins call to open or close the details column. It also seats the theme presenter, which projects the resolved color scheme, alias tokens, content font size, and `theme-color` metadata onto the document. The Terminal section is a Session-scoped, line-oriented PTY workspace: it creates `web:` terminals through the Session face, polls bounded scrollback, supports command history and SIGINT, and leaves the Host process alive across navigation. It intentionally does not claim raw xterm, ANSI screen restoration, resize, or full-screen TUI support. Choose it for the standard window chrome; panel geometry is transient and resets on reload.
 
 ## Table of Contents
 

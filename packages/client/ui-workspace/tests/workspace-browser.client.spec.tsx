@@ -81,8 +81,10 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     archiveSession: vi.fn(async () => {}),
+    deleteSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     insertSessionBefore: vi.fn(async () => {}),
+    moveSession: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useConnectionGeneration: selector => selector(undefined),
@@ -1304,6 +1306,52 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     expect(deleteWorkspace).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+  })
+
+  it('confirms session deletion, warns about the permanent log removal, and closes on resolution', async () => {
+    let resolveDelete!: () => void
+    const deleteSession = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve }))
+    mount({
+      useSessions: hook(sessionState([summary('gone-s', 1, { displayTitle: 'Gone' })])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['gone-s'], 'Alpha')])),
+      deleteSession,
+    })
+    fireEvent.click(screen.getByText('Alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“Gone”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除对话' }))
+    const dialog = screen.getByRole('dialog', { name: '删除对话' })
+    expect(dialog.textContent).toContain('将永久删除对话“Gone”及其全部记录')
+    expect(dialog.textContent).toContain('此操作无法撤销')
+
+    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '删除对话' })
+    fireEvent.click(confirm)
+    expect(deleteSession).toHaveBeenCalledOnce()
+    expect(deleteSession).toHaveBeenCalledWith(sid('gone-s'))
+    expect(confirm.disabled).toBe(true)
+    expect(screen.getByRole('status').textContent).toBe('正在删除对话…')
+    await act(async () => { resolveDelete() })
+    // Resolution closes directly: the injected action re-pulled the session
+    // baseline before resolving, so the row is already gone from the list.
+    expect(screen.queryByRole('dialog', { name: '删除对话' })).toBeNull()
+  })
+
+  it('keeps the session delete dialog open on failure and shows the error', async () => {
+    const deleteSession = vi.fn().mockRejectedValueOnce(new Error('session-live: it is live'))
+    mount({
+      useSessions: hook(sessionState([summary('kept-s', 1, { displayTitle: 'Kept' })])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['kept-s'], 'Alpha')])),
+      deleteSession,
+    })
+    fireEvent.click(screen.getByText('Alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“Kept”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除对话' }))
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe('session-live: it is live')
+    })
+    expect(screen.getByRole('dialog', { name: '删除对话' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '删除对话' })).toBeNull()
   })
 
   it('search hides drag affordances (rows are not draggable during search)', () => {

@@ -19,6 +19,13 @@ import type {
   SessionQueuedItem,
   SessionRequestId,
   SessionError,
+  SessionTerminalCloseValue,
+  SessionTerminalListValue,
+  SessionTerminalOpenValue,
+  SessionTerminalReadValue,
+  SessionTerminalSendValue,
+  SessionTerminalSignal,
+  SessionTerminalSignalValue,
 } from '../../types.ts'
 import type { ClientFailure, ClientResult } from '../contract/result.ts'
 import { transportResult } from '../contract/result.ts'
@@ -192,6 +199,7 @@ export class Session implements SessionFace {
       time: Date.now(),
       text: input.text,
       images: input.images,
+      ...(input.files === undefined || input.files.length === 0 ? {} : { files: input.files }),
     }]
     this.submissionSettlements.set(requestId, { onRetire: input.onRetire, retiring: false })
     // The blank → engaging edge flips here, ahead of prompt(): the composer
@@ -244,7 +252,16 @@ export class Session implements SessionFace {
           },
         }
       } else {
-        if (content.some(part => part.type === 'image')) {
+        if (content.some(part => part.type === 'file')) {
+          result = {
+            ok: false,
+            error: {
+              code: 'attachment-error',
+              message: 'File input is unavailable for subagent continuations.',
+              details: { reason: 'SUBAGENT_FILE_UNSUPPORTED' },
+            },
+          }
+        } else if (content.some(part => part.type === 'image')) {
           result = {
             ok: false,
             error: {
@@ -364,6 +381,91 @@ export class Session implements SessionFace {
       this.notifier.markDirty()
     }
     return result
+  }
+
+  /** List shell PTYs owned by this Session Agent. */
+  async terminalList(): Promise<ClientResult<SessionTerminalListValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalList({ sessionId: this.sessionId }))
+    } catch (error) {
+      return transportResult<SessionTerminalListValue>(error)
+    }
+  }
+
+  /** Create one shell PTY rooted at this Session workspace. */
+  async terminalOpen(name?: string): Promise<ClientResult<SessionTerminalOpenValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalOpen({
+        sessionId: this.sessionId,
+        ...(name === undefined ? {} : { name }),
+      }))
+    } catch (error) {
+      return transportResult<SessionTerminalOpenValue>(error)
+    }
+  }
+
+  /** Submit text to one shell PTY and return after acceptance. */
+  async terminalSend(
+    terminalSessionId: string,
+    text: string,
+    submit = true,
+  ): Promise<ClientResult<SessionTerminalSendValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalSend({
+        sessionId: this.sessionId,
+        terminalSessionId,
+        text,
+        submit,
+      }))
+    } catch (error) {
+      return transportResult<SessionTerminalSendValue>(error)
+    }
+  }
+
+  /** Read one bounded newest-relative scrollback page. */
+  async terminalRead(
+    terminalSessionId: string,
+    offset?: number,
+    count?: number,
+  ): Promise<ClientResult<SessionTerminalReadValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalRead({
+        sessionId: this.sessionId,
+        terminalSessionId,
+        ...(offset === undefined ? {} : { offset }),
+        ...(count === undefined ? {} : { count }),
+      }))
+    } catch (error) {
+      return transportResult<SessionTerminalReadValue>(error)
+    }
+  }
+
+  /** Deliver one allowed signal to the PTY foreground process group. */
+  async terminalSignal(
+    terminalSessionId: string,
+    signal: SessionTerminalSignal,
+  ): Promise<ClientResult<SessionTerminalSignalValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalSignal({
+        sessionId: this.sessionId,
+        terminalSessionId,
+        signal,
+      }))
+    } catch (error) {
+      return transportResult<SessionTerminalSignalValue>(error)
+    }
+  }
+
+  /** Close one PTY and await its complete process tree. */
+  async terminalClose(terminalSessionId: string): Promise<ClientResult<SessionTerminalCloseValue>> {
+    try {
+      return toSessionResult(await this.remote.session.terminalClose({
+        sessionId: this.sessionId,
+        terminalSessionId,
+      }))
+    } catch (error) {
+      return transportResult<SessionTerminalCloseValue>(error)
+    }
   }
 
   /**

@@ -4,6 +4,10 @@
 - insert:
     - id: time-context
       name: '@deepseek-ai/dsh-time-context'
+      config:
+        # Avoid a new timestamp message on every tool-loop step while preserving
+        # a fresh reading at least once per minute for this opt-in schedule overlay.
+        refreshIntervalMs: 60000
 
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'

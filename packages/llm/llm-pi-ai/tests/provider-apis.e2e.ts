@@ -26,7 +26,9 @@ interface ProviderCase {
 }
 
 const openAIBaseURL = process.env.DSH_PI_AI_OPENAI_BASE_URL
+const openAIApiKey = process.env.OPENAI_API_KEY
 const azureOpenAIKey = process.env.AZURE_OPENAI_API_KEY
+const openAICacheBenchmark = process.env.DSH_PI_AI_OPENAI_CACHE_E2E === '1'
 // Strictly ANTHROPIC_*: the DeepSeek endpoint does not serve the anthropic-messages
 // protocol, so falling back to DEEPSEEK_API_KEY turns the keyless skip into a 404.
 const anthropicApiKey = process.env.ANTHROPIC_API_KEY
@@ -39,7 +41,7 @@ const providerCases: ProviderCase[] = [
     model: process.env.DSH_PI_AI_OPENAI_MODEL ?? 'gpt-5.5',
     ...azureOpenAIKey
       ? { apiKey: azureOpenAIKey, headers: { 'api-key': azureOpenAIKey, Authorization: '' } }
-      : {},
+      : openAIApiKey === undefined ? {} : { apiKey: openAIApiKey },
     ...openAIBaseURL ? { baseURL: openAIBaseURL } : {},
   },
   {
@@ -155,6 +157,13 @@ function expectNativeReplay(result: AssembledResult, profile: ProviderCase): PiA
   return (replayState as { response: PiAiReplayResponse }).response
 }
 
+// OpenAI prompt caching starts only after a sufficiently long shared prefix.
+// This exceeds that boundary while keeping the dynamic user suffix short.
+const CACHE_SYSTEM = 'Cache benchmark static instruction. '.repeat(128)
+// Compaction replays existing history verbatim, then appends one new instruction.
+// Keep this history long enough to make that replayed message prefix cacheable.
+const COMPACTION_HISTORY = 'Durable conversation fact for later compaction. '.repeat(256)
+
 const lookupTool: ToolSchema = {
   name: 'lookup_code',
   description: 'Look up the word represented by a short code.',
@@ -226,6 +235,55 @@ for (const profile of providerCases) {
         expect(textOf(second).toLowerCase()).toContain('ocean')
         expect(expectNativeReplay(second, profile).stopReason).toBe('stop')
       })
+
+      if (profile.provider === 'openai') {
+        it.skipIf(!openAICacheBenchmark)('reuses a cached static prefix across independent sessions', async () => {
+          const ctx = await harness()
+          const shared = {
+            provider: profile.provider,
+            model: profile.model,
+            system: CACHE_SYSTEM,
+            tools: [lookupTool],
+            messages: ask('Reply with exactly: cache-ready'),
+            maxTokens: 64,
+          }
+          const first = await assemble(ctx, { ...shared, sessionId: 'openai-cache-e2e-a' as never })
+          const second = await assemble(ctx, { ...shared, sessionId: 'openai-cache-e2e-b' as never })
+
+          expectFinish(first, 'stop')
+          expectFinish(second, 'stop')
+          expect(second.usage?.cacheReadTokens ?? 0).toBeGreaterThan(0)
+        }, 120_000)
+
+        it.skipIf(!openAICacheBenchmark)('reuses the replayed history prefix for a compaction-shaped request', async () => {
+          const ctx = await harness()
+          const history = createUserMessage({
+            content: [{ type: 'text', text: COMPACTION_HISTORY }],
+            source: { kind: 'plugin', plugin: 'test' },
+          })
+          const shared = {
+            provider: profile.provider,
+            model: profile.model,
+            system: CACHE_SYSTEM,
+            tools: [lookupTool],
+            maxTokens: 64,
+          }
+          const first = await assemble(ctx, {
+            ...shared,
+            messages: [history, ...ask('Reply with exactly: history-ready')],
+            sessionId: 'openai-compaction-e2e-a' as never,
+          })
+          const second = await assemble(ctx, {
+            ...shared,
+            messages: [history, ...ask('Reply with exactly: checkpoint-ready')],
+            sessionId: 'openai-compaction-e2e-b' as never,
+          })
+
+          expectFinish(first, 'stop')
+          expectFinish(second, 'stop')
+          expect(second.usage?.cacheReadTokens ?? 0).toBeGreaterThan(0)
+        }, 120_000)
+      }
 
       if (profile.provider === 'anthropic') {
         it('sends a real image through the authenticated Anthropic visual path', async () => {

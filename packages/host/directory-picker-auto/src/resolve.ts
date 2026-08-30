@@ -34,18 +34,18 @@ const present = (value: string | undefined): boolean => value !== undefined && v
 /**
  * Resolve which backend serves this boot. `native` requires every signal that
  * the operator can see the host display and the native backend can serve it:
- * a loopback-only bind (an all-interfaces bind admits remote browsers no OS
- * chooser can reach), no SSH launch (under SSH port-forwarding the chooser
- * would open on the unattended server), and a servable display session —
- * assumed on darwin/win32, requiring `DISPLAY`/`WAYLAND_DISPLAY` plus a
- * chooser binary on linux, and never true elsewhere (the native backend
- * drives exactly darwin/win32/linux). Anything ambiguous resolves to
- * `browse`, which works everywhere.
+ * no SSH launch (under SSH port-forwarding the chooser would open on the
+ * unattended server), and a servable display session — assumed on
+ * darwin/win32, requiring `DISPLAY`/`WAYLAND_DISPLAY` plus a chooser binary
+ * on linux, and never true elsewhere (the native backend drives exactly
+ * darwin/win32/linux). The Web transport itself pins `host.pickDirectory` to
+ * loopback, so an all-interfaces listener does not grant a LAN browser access
+ * to the desktop dialog. Anything ambiguous resolves to `browse`, which works
+ * everywhere.
  * @param facts - the sampled host facts.
  * @returns the backend kind to mount.
  */
 export function resolveDirectoryPickerBackend(facts: DirectoryPickerHostFacts): DirectoryPickerBackendKind {
-  if (facts.bindHost !== '127.0.0.1') return 'browse'
   if (present(facts.env.SSH_CONNECTION) || present(facts.env.SSH_TTY)) return 'browse'
   if (facts.platform === 'darwin' || facts.platform === 'win32') return 'native'
   if (facts.platform !== 'linux' || !facts.linuxChooser) return 'browse'

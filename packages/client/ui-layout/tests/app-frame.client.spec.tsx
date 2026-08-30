@@ -15,7 +15,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
-import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
+import { NAVRAIL_WIDTH, SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -108,9 +108,17 @@ function mountFrame() {
   return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
+/** The three-column work shell inside the frame (right of the nav rail). */
+function workShell(frame: HTMLElement): HTMLElement {
+  const shell = frame.querySelector('[class*="workShell"]')
+  if (shell === null) throw new Error('missing work shell')
+  return shell as HTMLElement
+}
+
 function tracks(frame: HTMLElement): number[] {
-  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px$/.exec(frame.style.gridTemplateColumns)
-  if (m === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
+  const template = workShell(frame).style.gridTemplateColumns
+  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px$/.exec(template)
+  if (m === null) throw new Error(`unexpected template: ${template}`)
   return [Number(m[1]), Number(m[2])]
 }
 
@@ -129,6 +137,8 @@ beforeEach(() => {
   selectedSessionBlank.current = false
   selectedSessionTitle.current = undefined
   workspacesReady.current = true
+  // The nav section persists in localStorage; specs start from a clean slate.
+  window.localStorage.clear()
   vi.useFakeTimers()
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => { cb(0) }, 16) as unknown as number)
@@ -146,6 +156,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  window.history.replaceState({}, '', '/')
   document.title = ''
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -273,7 +284,9 @@ describe('AppFrame', () => {
   })
 
   it('drag base is the rendered (concession-clamped) width, not the preference', () => {
-    frameWidth = 1250 // step-2 squeeze: details renders 330 while preference is 360
+    // Step-2 squeeze: details renders 330 while preference is 360. The frame
+    // is NAVRAIL_WIDTH wider than the work area the concession chain sees.
+    frameWidth = 1250 + NAVRAIL_WIDTH
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
     expect(tracks(frame)).toEqual([280, 330])
@@ -302,7 +315,7 @@ describe('AppFrame', () => {
   it('viewport shrink triggers the concession chain via ResizeObserver', () => {
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
-    frameWidth = 1250
+    frameWidth = 1250 + NAVRAIL_WIDTH // work area 1250: step-2 squeeze
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
     frameWidth = 1920
@@ -319,6 +332,426 @@ describe('AppFrame', () => {
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
     act(() => { instance.actions.toggleSidebar() })
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
+  })
+})
+
+describe('AppFrame — LAN target viewport', () => {
+  it('uses a shared phone target as a single-column layout on any actual viewport', () => {
+    window.history.replaceState({}, '', '/?dsh-viewport=390x844')
+    const { frame, slotCalls } = mountFrame()
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(frame.style.gridTemplateColumns).toBe('minmax(0, 1fr)')
+    expect(frame.getAttribute('data-shared-viewport')).toBe('390x844')
+    expect(frame.hasAttribute('data-shared-mobile-layout')).toBe(true)
+    expect(slotCalls.map(call => call.key)).not.toContain('sidebar')
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
+  })
+
+  it('hides the nav rail and forces the work section on a shared phone target', () => {
+    window.history.replaceState({}, '', '/?dsh-viewport=390x844')
+    window.localStorage.setItem('dsh.navSection', 'news')
+    const { frame } = mountFrame()
+    expect(frame.querySelector('[class*="navRail"]')).toBeNull()
+    expect(frame.getAttribute('data-nav-section')).toBe('work')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(false)
+    expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+  })
+})
+
+describe('AppFrame — nav rail sections', () => {
+  function navItems(frame: HTMLElement): HTMLElement[] {
+    return [...frame.querySelectorAll('[class*="navItem"]')] as HTMLElement[]
+  }
+
+  function clickNav(frame: HTMLElement, section: string): void {
+    const item = frame.querySelector(`[data-section="${section}"]`)
+    if (item === null) throw new Error(`missing nav item: ${section}`)
+    act(() => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  }
+
+  it('renders the rail with nine sections and work active by default', () => {
+    const { frame } = mountFrame()
+    expect(frame.style.gridTemplateColumns).toBe(`${String(NAVRAIL_WIDTH)}px minmax(0, 1fr)`)
+    expect(frame.getAttribute('data-nav-section')).toBe('work')
+    const items = navItems(frame)
+    expect(items).toHaveLength(9)
+    expect(items.map(item => item.dataset.section)).toEqual(['work', 'terminal', 'voice', 'news', 'lora', 'collab', 'bench', 'knowledge', 'market'])
+    expect(items[0]!.hasAttribute('data-active')).toBe(true)
+    expect(items[1]!.hasAttribute('data-active')).toBe(false)
+  })
+
+  it('switching to a non-work section hides the work shell without unmounting it', () => {
+    const { frame, getByTestId } = mountFrame()
+    clickNav(frame, 'lora')
+    expect(frame.getAttribute('data-nav-section')).toBe('lora')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+    // The session slots stay mounted behind the section pane.
+    expect(getByTestId('center-content')).toBeTruthy()
+    expect(getByTestId('details-content')).toBeTruthy()
+    expect(window.localStorage.getItem('dsh.navSection')).toBe('lora')
+  })
+
+  it('the news section renders the live news panel instead of the placeholder', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ updatedAt: 0, crawling: false, platforms: [], items: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        const item = frame.querySelector('[data-section="news"]')
+        if (item === null) throw new Error('missing nav item: news')
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(frame.getAttribute('data-nav-section')).toBe('news')
+      expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+      expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+      expect(frame.querySelector('[role="region"][aria-label="news.title"]')).toBeTruthy()
+      expect(frame.querySelectorAll('[class*="chip"]').length).toBeGreaterThan(0)
+      expect(fetchMock).toHaveBeenCalledWith('/api/ai-news/feed', expect.objectContaining({ cache: 'no-store' }))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('opens a translated news card through the built-in browser event', async () => {
+    const link = 'https://www.theverge.com/ai/example'
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        updatedAt: 1,
+        crawling: false,
+        platforms: [{ id: 'rss', label: '综合', ok: true, count: 1 }],
+        items: [{
+          id: 'rss:1', platform: 'rss', title: 'Original English title', translatedTitle: '中文标题',
+          summary: 'English summary', translatedSummary: '中文摘要', link, publishedAt: Date.now(), aiScore: 3,
+        }],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    let openedUrl = ''
+    const onOpen = (event: Event): void => {
+      const custom = event as CustomEvent<{ url: string; onResult?: (opened: boolean) => void }>
+      openedUrl = custom.detail.url
+      event.preventDefault()
+      custom.detail.onResult?.(true)
+    }
+    window.addEventListener('dsh-browser-panel:open', onOpen)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        clickNav(frame, 'news')
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(frame.textContent).toContain('中文标题')
+      expect(frame.textContent).toContain('中文摘要')
+      const card = frame.querySelector(`a[href="${link}"]`)
+      if (card === null) throw new Error('missing news card')
+      const nativeDefaultAllowed = card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      expect(nativeDefaultAllowed).toBe(false)
+      expect(openedUrl).toBe(link)
+    } finally {
+      window.removeEventListener('dsh-browser-panel:open', onOpen)
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the collab section renders the collaboration studio instead of the placeholder', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url.includes('/api/collab/meta')) {
+        return { ok: true, json: async () => ({ roles: [], stages: [], projectTypes: ['software'] }) }
+      }
+      if (url.includes('/api/collab/models')) {
+        return { ok: true, json: async () => ({ default: null, providers: [] }) }
+      }
+      if (url.includes('/api/collab/projects')) {
+        return { ok: true, json: async () => ({ projects: [] }) }
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        const item = frame.querySelector('[data-section="collab"]')
+        if (item === null) throw new Error('missing nav item: collab')
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(frame.getAttribute('data-nav-section')).toBe('collab')
+      expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+      expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+      expect(frame.querySelector('[role="region"][aria-label="collab.title"]')).toBeTruthy()
+      const calledUrls = fetchMock.mock.calls.map(call => String(call[0]))
+      expect(calledUrls).toContain('/api/collab/meta')
+      expect(calledUrls).toContain('/api/collab/models')
+      expect(calledUrls).toContain('/api/collab/projects')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the bench section renders the model testing bench instead of the placeholder', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url.includes('/api/bench/meta')) {
+        return { ok: true, json: async () => ({ categories: [{ id: 'coding', title: '编程', description: 'd' }], limits: { maxContestantsPerRound: 12 } }) }
+      }
+      if (url.includes('/api/bench/models')) {
+        return { ok: true, json: async () => ({ default: null, providers: [] }) }
+      }
+      if (url.includes('/api/bench/rounds')) {
+        return { ok: true, json: async () => ({ rounds: [] }) }
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        const item = frame.querySelector('[data-section="bench"]')
+        if (item === null) throw new Error('missing nav item: bench')
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(frame.getAttribute('data-nav-section')).toBe('bench')
+      expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+      expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+      expect(frame.querySelector('[role="region"][aria-label="bench.title"]')).toBeTruthy()
+      const calledUrls = fetchMock.mock.calls.map(call => String(call[0]))
+      expect(calledUrls).toContain('/api/bench/meta')
+      expect(calledUrls).toContain('/api/bench/models')
+      expect(calledUrls).toContain('/api/bench/rounds')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('submits the selected bench difficulty when creating a round', async () => {
+    const created = {
+      id: 'round-hard', name: 'Hard round', category: 'coding', difficulty: 'hard', createdAt: 2,
+      status: 'generating', modelCount: 0, models: [], contestants: {},
+    }
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/bench/meta') {
+        return { ok: true, json: async () => ({ categories: [{ id: 'coding', title: 'Coding', description: 'd' }], limits: { maxContestantsPerRound: 12 } }) }
+      }
+      if (url === '/api/bench/models') return { ok: true, json: async () => ({ default: null, providers: [] }) }
+      if (url === '/api/bench/rounds' && init?.method === 'POST') return { ok: true, json: async () => ({ record: created }) }
+      if (url === '/api/bench/rounds') return { ok: true, json: async () => ({ rounds: [] }) }
+      if (url === '/api/bench/rounds/round-hard') return { ok: true, json: async () => ({ record: created, question: null }) }
+      if (url.startsWith('/api/bench/rounds/round-hard/events')) return { ok: true, json: async () => ({ events: [], total: 0 }) }
+      return { ok: false, json: async () => ({ error: 'unexpected' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { frame, getAllByText, getByText } = mountFrame()
+    await act(async () => {
+      frame.querySelector<HTMLElement>('[data-section="bench"]')?.click()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      getAllByText('bench.new')[0]?.click()
+      await Promise.resolve()
+    })
+    expect(frame.querySelector('[data-active="true"]')?.textContent).not.toBeNull()
+    await act(async () => {
+      getByText('bench.difficulty.hard').click()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      getByText('bench.form.submit').click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    const post = fetchMock.mock.calls.find(call => String(call[0]) === '/api/bench/rounds' && call[1]?.method === 'POST')
+    expect(post).toBeDefined()
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ category: 'coding', difficulty: 'hard', start: true })
+  })
+
+  it('allows a stopped bench round without a question to generate again', async () => {
+    const round = {
+      id: 'round-stopped', name: 'Interrupted round', category: 'coding', difficulty: 'medium', createdAt: 1,
+      status: 'stopped', modelCount: 0, models: [], contestants: {},
+      error: 'interrupted',
+    }
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url === '/api/bench/meta') {
+        return { ok: true, json: async () => ({ categories: [{ id: 'coding', title: 'Coding', description: 'd' }], limits: { maxContestantsPerRound: 12 } }) }
+      }
+      if (url === '/api/bench/models') return { ok: true, json: async () => ({ default: null, providers: [] }) }
+      if (url === '/api/bench/rounds') return { ok: true, json: async () => ({ rounds: [round] }) }
+      if (url === '/api/bench/rounds/round-stopped') return { ok: true, json: async () => ({ record: round, question: null }) }
+      if (url.startsWith('/api/bench/rounds/round-stopped/events')) return { ok: true, json: async () => ({ events: [], total: 0 }) }
+      return { ok: false, json: async () => ({ error: 'unexpected' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const { frame, getByText } = mountFrame()
+      await act(async () => {
+        frame.querySelector<HTMLElement>('[data-section="bench"]')?.click()
+        await Promise.resolve()
+      })
+      await act(async () => {
+        getByText('Interrupted round').click()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(getByText('bench.action.generate')).toBeTruthy()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the lora section renders the LoRA training studio instead of the placeholder', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url.includes('/api/lora/status')) {
+        return { ok: true, json: async () => ({ service: 'dsh-lora-service', online: true, gpu: {}, busy: false, training_running: false }) }
+      }
+      if (url.includes('/api/lora/train/status')) {
+        return { ok: true, json: async () => ({ running: false, current_step: 0, total_steps: 0, loss: null, loss_history: [], speed: '', eta: '', elapsed: '', error: '', samples: [], log_tail: [] }) }
+      }
+      if (url.includes('/api/lora/basemodels')) {
+        return { ok: true, json: async () => ([{ name: 'Juggernaut-XL_v9.safetensors', path: 'E:/ckpt.safetensors', size_gb: 6.6, family: 'sdxl', managed: false }]) }
+      }
+      if (url.includes('/api/lora/datasets')) {
+        return { ok: true, json: async () => ([{ name: 'goutou', images: 24, captioned: 24 }]) }
+      }
+      if (url.includes('/api/lora/outputs')) {
+        return { ok: true, json: async () => ([{ name: 'goutou.safetensors', size_mb: 162.6, mtime: 1 }]) }
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        const item = frame.querySelector('[data-section="lora"]')
+        if (item === null) throw new Error('missing nav item: lora')
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(frame.getAttribute('data-nav-section')).toBe('lora')
+      expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+      expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+      expect(frame.querySelector('[role="region"][aria-label="lora.title"]')).toBeTruthy()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the knowledge section renders the knowledge center without unmounting work', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url === '/api/knowledge/snapshot') {
+        return {
+          ok: true,
+          json: async () => ({
+            source: { kind: 'hindsight', status: 'online', bankId: 'coding-agent::deepseek-harness', readOnly: true, syncedAt: '2026-08-30T00:00:00Z' },
+            folders: [{ id: 'kf-1', name: 'Architecture', parentId: null, depth: 0, path: ['Architecture'], pageCount: 1 }],
+            pages: [{ id: 'kp-1', name: 'Architecture guide', description: 'System boundaries', folderId: 'kf-1', folderPath: ['Architecture'], tags: [], updatedAt: '2026-08-30T00:00:00Z', stale: false, managed: false }],
+            stats: {
+              facts: 182,
+              links: 2532,
+              documents: 12,
+              observations: 84,
+              pendingOperations: 2,
+              failedOperations: 3,
+              pendingConsolidation: 0,
+              failedConsolidation: 0,
+              lastConsolidatedAt: null,
+              lastMemoryWriteAt: null,
+              factsByType: {},
+              operationsByStatus: {},
+            },
+            tags: [],
+          }),
+        }
+      }
+      if (url === '/api/knowledge/pages/kp-1') {
+        return { ok: true, json: async () => ({ page: { id: 'kp-1', name: 'Architecture guide', type: 'knowledge-page', description: 'System boundaries', tags: [], timestamp: '2026-08-30T00:00:00Z', body: '## Boundaries\n\nHost owns routes.', markdown: '' } }) }
+      }
+      return { ok: false, status: 404, json: async () => ({ error: 'unexpected route' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { frame, getByTestId } = mountFrame()
+    clickNav(frame, 'knowledge')
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(frame.getAttribute('data-nav-section')).toBe('knowledge')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+    expect(getByTestId('center-content')).toBeTruthy()
+    expect(getByTestId('details-content')).toBeTruthy()
+    expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
+    expect(frame.querySelector('[role="region"][aria-label="nav.knowledge"]')).toBeTruthy()
+    expect(frame.textContent).toContain('Architecture guide')
+    expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/snapshot', { cache: 'no-store' })
+    expect(window.localStorage.getItem('dsh.navSection')).toBe('knowledge')
+  })
+
+  it('the skill market renders the searchable catalog without unmounting work', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fetchedAt: '2026-08-30T00:00:00Z', cached: false,
+        sources: [{ id: 'baseline', label: 'DSH 审计基线', url: 'https://github.com/deepseek-ai/deepseek-harness', status: 'online', count: 1 }],
+        items: [{
+          id: 'skill:test', kind: 'skill', name: 'Searchable Skill', publisher: 'tester', description: 'Search tools safely',
+          sourceUrl: 'https://skills.sh/tester/skills/searchable', codeUrl: 'https://github.com/tester/skills', registry: 'skills.sh',
+          publishedAt: '2026-08-20T00:00:00Z', updatedAt: '2026-08-30T00:00:00Z', stars: 120, language: 'Markdown', license: 'MIT',
+          install: 'npx skills add tester/skills@searchable', risk: { level: 'low', confidence: 'declared', rationale: 'Prompt only', signals: ['提示词 / 文档'] }, tags: ['search'],
+        }],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { frame, getByTestId } = mountFrame()
+    await act(async () => {
+      clickNav(frame, 'market')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(frame.getAttribute('data-nav-section')).toBe('market')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+    expect(getByTestId('center-content')).toBeTruthy()
+    expect(getByTestId('details-content')).toBeTruthy()
+    expect(frame.querySelector('[class*="marketPlaceholder"]')).toBeNull()
+    expect(frame.querySelector('[role="region"][aria-label="nav.market"]')).toBeTruthy()
+    expect(frame.textContent).toContain('Searchable Skill')
+    expect(frame.textContent).toContain('原项目地址')
+    expect(fetchMock).toHaveBeenCalledWith('/api/market/catalog?sort=date', { cache: 'no-store' })
+    expect(window.localStorage.getItem('dsh.navSection')).toBe('market')
+  })
+
+  it('switching back to work restores the shell and drops the section pane', () => {
+    const { frame } = mountFrame()
+    clickNav(frame, 'market')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+    clickNav(frame, 'work')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(false)
+    expect(frame.querySelector('[class*="marketPlaceholder"]')).toBeNull()
+    expect(window.localStorage.getItem('dsh.navSection')).toBe('work')
+  })
+
+  it('restores the persisted section on mount', () => {
+    window.localStorage.setItem('dsh.navSection', 'voice')
+    const { frame } = mountFrame()
+    expect(frame.getAttribute('data-nav-section')).toBe('voice')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+  })
+
+  it('an unrecognized persisted value falls back to work', () => {
+    window.localStorage.setItem('dsh.navSection', 'bogus')
+    const { frame } = mountFrame()
+    expect(frame.getAttribute('data-nav-section')).toBe('work')
   })
 })
 
@@ -429,7 +862,7 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
   it('double resize inside one frame rides the pending rAF (??= guard)', () => {
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
-    frameWidth = 1250
+    frameWidth = 1250 + NAVRAIL_WIDTH // work area 1250: step-2 squeeze
     act(() => { fireResize?.(); fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
   })

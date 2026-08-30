@@ -17,6 +17,11 @@
 export interface Columns { sidebar: number; center: number; details: number }
 
 // Contract-frozen geometry: the three-column concession chain's fixed points.
+/** App-level nav rail fixed width, left of the sidebar column. The rail never
+ *  concedes either: the three-column concession chain solves against the
+ *  viewport MINUS this width (AppFrame), so the work area absorbs the rail
+ *  exactly like a permanently open panel. */
+export const NAVRAIL_WIDTH = 72
 /** Center column floor; only the final fallback may go below it. */
 export const CENTER_MIN = 640
 /** Sidebar drag clamp floor. */

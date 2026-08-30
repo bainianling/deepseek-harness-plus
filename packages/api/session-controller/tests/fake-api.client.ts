@@ -18,6 +18,12 @@ import type {
   SessionProjectionBaseline,
   SessionSelectModelRequest,
   SessionSelectModelValue,
+  SessionTerminalCloseValue,
+  SessionTerminalListValue,
+  SessionTerminalOpenValue,
+  SessionTerminalReadValue,
+  SessionTerminalSendValue,
+  SessionTerminalSignalValue,
 } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { WorkspaceRemote } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { WorkspaceFollowFrame } from '@deepseek-ai/dsh-api-workspace-controller/types'
@@ -156,6 +162,27 @@ export class FakeApiClient {
   onCancel: (payload: unknown) => Promise<RpcResponse<{ accepted: true }>> = () => Promise.resolve(ok({ accepted: true as const }))
   onOpenWorkspacePath: (payload: unknown) => Promise<RemoteResult<{ opened: true }>> =
     () => Promise.resolve(remoteOk({ opened: true as const }))
+  onTerminalList: (payload: unknown) => Promise<RemoteResult<SessionTerminalListValue>> =
+    () => Promise.resolve(remoteOk({ sessions: [] }))
+  onTerminalOpen: (payload: unknown) => Promise<RemoteResult<SessionTerminalOpenValue>> =
+    payload => Promise.resolve(remoteOk({
+      sessionId: `fk-pty-${String(this.terminalCount++)}`,
+      type: 'shell',
+      status: { kind: 'running' as const },
+      busy: false,
+      motd: 'fake shell ready',
+      ...((payload as { name?: string }).name === undefined
+        ? {}
+        : { name: (payload as { name?: string }).name }),
+    }))
+  onTerminalSend: (payload: unknown) => Promise<RemoteResult<SessionTerminalSendValue>> =
+    () => Promise.resolve(remoteOk({ accepted: true as const }))
+  onTerminalRead: (payload: unknown) => Promise<RemoteResult<SessionTerminalReadValue>> =
+    () => Promise.resolve(remoteOk({ text: '', totalLines: 0, lineBegin: 0, lineEnd: 0, truncated: false }))
+  onTerminalSignal: (payload: unknown) => Promise<RemoteResult<SessionTerminalSignalValue>> =
+    () => Promise.resolve(remoteOk({ delivered: true as const, targetPgid: 0 }))
+  onTerminalClose: (payload: unknown) => Promise<RemoteResult<SessionTerminalCloseValue>> =
+    () => Promise.resolve(remoteOk({ closed: true }))
 
   private readonly followConns = new Map<SessionId, ValueStreamConn<SessionFollowFrame>[]>()
   private readonly controlConns: ValueStreamConn<SessionControlFrame>[] = []
@@ -172,6 +199,7 @@ export class FakeApiClient {
     archivedSessionIds: [],
   }
   lastSearchSignal: AbortSignal | undefined
+  private terminalCount = 0
 
   onSubagentList: (payload: unknown) => Promise<RemoteResult<SubagentCatalog>>
     = () => Promise.resolve(remoteOk({ entries: [], parentAvailable: true }))
@@ -198,6 +226,12 @@ export class FakeApiClient {
 
   onWorkspaceArchiveSession: (payload: unknown) => Promise<RemoteResult<{ archivedSessionIds: SessionId[] }>> =
     payload => Promise.resolve(remoteOk({ archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId] }))
+
+  onWorkspaceMoveSession: (payload: unknown) => Promise<RemoteResult<{ workspace: WorkspaceView }>> =
+    () => Promise.resolve(remoteOk({ workspace: fakeWorkspace('fk-ws') }))
+
+  onWorkspaceDeleteSession: (payload: unknown) => Promise<RemoteResult<{ deleted: true }>> =
+    () => Promise.resolve(remoteOk({ deleted: true }))
 
   /** Remote namespaces bound to this fake's programmable unary slots and stream pumps. */
   sessionRemotes(): RuntimeRemotes {
@@ -236,6 +270,12 @@ export class FakeApiClient {
         attachment: payload => this.remoteResult('session.attachment', payload, this.onAttachment(payload)),
         updateQueue: payload => this.remoteResult('session.updateQueue', payload, this.onUpdateQueue(payload)),
         cancel: payload => this.remoteResult('session.cancel', payload, this.onCancel(payload)),
+        terminalList: payload => this.record('session.terminalList', payload, this.onTerminalList(payload)),
+        terminalOpen: payload => this.record('session.terminalOpen', payload, this.onTerminalOpen(payload)),
+        terminalSend: payload => this.record('session.terminalSend', payload, this.onTerminalSend(payload)),
+        terminalRead: payload => this.record('session.terminalRead', payload, this.onTerminalRead(payload)),
+        terminalSignal: payload => this.record('session.terminalSignal', payload, this.onTerminalSignal(payload)),
+        terminalClose: payload => this.record('session.terminalClose', payload, this.onTerminalClose(payload)),
         openWorkspacePath: payload => this.record(
           'session.openWorkspacePath',
           payload,
@@ -258,27 +298,46 @@ export class FakeApiClient {
           this.onSubagentInterrupt({ childSessionId, parentSessionId, mode }),
         ),
       },
-      workspace: {
-        create: payload => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
-        rename: payload => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
-        delete: payload => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
-        insertBefore: payload => this.record(
-          'workspace.insertBefore',
-          payload,
-          this.onWorkspaceInsertBefore(payload),
-        ),
-        insertSessionBefore: payload => this.record(
-          'workspace.insertSessionBefore',
-          payload,
-          this.onWorkspaceInsertSessionBefore(payload),
-        ),
-        archiveSession: payload => this.record(
-          'workspace.archiveSession',
-          payload,
-          this.onWorkspaceArchiveSession(payload),
-        ),
-        follow: signal => this.openWorkspace(signal),
-      },
+      workspace: this.workspaceNamespace(),
+    }
+  }
+
+  /**
+   * Workspace namespace double. The inferred return type (not a literal
+   * annotated as the generated Remote face) lets the fake carry the newest
+   * verbs before and after the typert artifact regenerates.
+   */
+  private workspaceNamespace() {
+    return {
+      create: (payload: unknown) => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
+      rename: (payload: unknown) => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
+      delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
+      insertBefore: (payload: unknown) => this.record(
+        'workspace.insertBefore',
+        payload,
+        this.onWorkspaceInsertBefore(payload),
+      ),
+      insertSessionBefore: (payload: unknown) => this.record(
+        'workspace.insertSessionBefore',
+        payload,
+        this.onWorkspaceInsertSessionBefore(payload),
+      ),
+      archiveSession: (payload: unknown) => this.record(
+        'workspace.archiveSession',
+        payload,
+        this.onWorkspaceArchiveSession(payload),
+      ),
+      moveSession: (payload: unknown) => this.record(
+        'workspace.moveSession',
+        payload,
+        this.onWorkspaceMoveSession(payload),
+      ),
+      deleteSession: (payload: unknown) => this.record(
+        'workspace.deleteSession',
+        payload,
+        this.onWorkspaceDeleteSession(payload),
+      ),
+      follow: (signal?: AbortSignal) => this.openWorkspace(signal),
     }
   }
 

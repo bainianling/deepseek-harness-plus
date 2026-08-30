@@ -142,6 +142,8 @@ export interface TerminalSessionSnapshot {
   pid?: number
   /** Current top-level process status. */
   status: TerminalSessionStatus
+  /** Whether one send operation currently owns this terminal. */
+  busy: boolean
 }
 
 /** Backend-owned live session retained by {@link TerminalSessionService}. */

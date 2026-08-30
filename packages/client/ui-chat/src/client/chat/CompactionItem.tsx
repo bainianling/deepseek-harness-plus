@@ -23,6 +23,15 @@ interface CompactionItemProps {
   t: ChatViewSlotProps['t']
 }
 
+function summaryCacheHit(node: CompactionSummaryNode): { percent: number; tokens: number } | undefined {
+  const usage = node.summaryUsage
+  const cacheRead = usage?.cacheReadTokens
+  if (usage === undefined || cacheRead === undefined || cacheRead === 0) return undefined
+  const total = usage.inputTokens + cacheRead + (usage.cacheWriteTokens ?? 0)
+  if (total === 0) return undefined
+  return { percent: Math.round(cacheRead / total * 100), tokens: cacheRead }
+}
+
 /**
  * Renders the model-history compaction marker.
  * @param props - the marker node off the snapshot cache.
@@ -45,6 +54,7 @@ export const CompactionItem = memo(function CompactionItem({
     })
     : fallbackSummary
       ?? (expandable ? t('message.compaction.expand') : t('message.compaction.unavailable'))
+  const cache = summaryCacheHit(node)
   return (
     <div className={css.compactionRow}>
       <button
@@ -68,6 +78,11 @@ export const CompactionItem = memo(function CompactionItem({
         <span className={css.compactionTitle}>{title ?? t('message.compaction')}</span>
         <span className={css.compactionSep} aria-hidden />
         <span className={css.compactionSummary}>{summary}</span>
+        {cache !== undefined && (
+          <span className={css.compactionSummary} data-compaction-cache>
+            {t('message.compaction.cache', cache)}
+          </span>
+        )}
       </button>
       {open && node.summary !== null
         && <div className={css.compactionBody}><MarkdownText text={node.summary} labels={labels} /></div>}

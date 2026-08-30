@@ -18,6 +18,7 @@ import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ModelSelection, ModelSelectionProjection } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { CommandContribution, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ModelSelectInjected } from '../src/client/slots.ts'
+import type { ModelBalanceActionInjected } from '../src/client/ModelBalanceAction.tsx'
 import { apply, inject } from '../src/client/index.ts'
 import { zh } from '../src/client/locales.ts'
 
@@ -106,13 +107,26 @@ async function bench() {
     },
   })
   const seats = new Map<string, {
-    inject: ((sessionId: SessionId) => ModelSelectInjected) | undefined
+    id: string | undefined
+    order: number | undefined
+    inject: ((...args: never[]) => unknown) | undefined
     locale: string | undefined
   }>()
   ctx.provide('slots', {
     inject(_name: string, callback: () => () => void) { return callback() },
-    register(options: { name: string; locale?: string; inject?: (sessionId: SessionId) => ModelSelectInjected }) {
-      seats.set(options.name, { inject: options.inject, locale: options.locale })
+    register(options: {
+      name: string
+      id?: string
+      order?: number
+      locale?: string
+      inject?: (...args: never[]) => unknown
+    }) {
+      seats.set(options.name, {
+        id: options.id,
+        order: options.order,
+        inject: options.inject,
+        locale: options.locale,
+      })
       return () => { seats.delete(options.name) }
     },
   })
@@ -157,7 +171,16 @@ async function bench() {
   return {
     ctx, fiber, mint, calls, remote,
     contribution: () => contribution!,
-    seat: () => seats.get('conversation.input.model')!,
+    seat: () => seats.get('conversation.input.model')! as {
+      inject: ((sessionId: SessionId) => ModelSelectInjected) | undefined
+      locale: string | undefined
+    },
+    footer: () => seats.get('sidebar.footer.action')! as {
+      id: string | undefined
+      order: number | undefined
+      inject: (() => ModelBalanceActionInjected) | undefined
+      locale: string | undefined
+    },
     hostCurrent: () => selected,
     setHostCurrent: (selection: ModelSelection) => { defaultSelection = selection },
     setProjected: (id: SessionId, value: ModelSelectionProjection) => { projections.get(id)?.set(value) },
@@ -170,13 +193,19 @@ async function bench() {
 const projection = (id: string) => ({ sessionId: sid(id) })
 
 describe('ui-model-selection dual entry', () => {
-  it('registers the /model contribution and the composer model seat', async () => {
+  it('registers the /model contribution, composer seat, and Settings-adjacent balance row', async () => {
     const b = await bench()
     expect(b.contribution().name).toBe('model')
     expect(b.contribution().ui.kind).toBe('popupSelect')
     expect(b.seat().inject).toBeTypeOf('function')
     // Copy rides the standard locale seat.
     expect(b.seat().locale).toBe('model')
+    expect(b.footer()).toMatchObject({
+      id: 'model-balance',
+      order: -100,
+      locale: 'model',
+    })
+    expect(b.footer().inject).toBeTypeOf('function')
   })
 
   it('popup options mark the host current active with the provider group in the detail', async () => {

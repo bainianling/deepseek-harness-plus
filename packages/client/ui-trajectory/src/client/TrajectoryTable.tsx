@@ -770,9 +770,15 @@ function inputTotal(usage: TrajectoryUsage): number | undefined {
   return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
 }
 
+function cacheHitPercent(usage: TrajectoryUsage, totalInput: number | undefined): number | undefined {
+  if (totalInput === undefined || totalInput === 0 || usage.cacheRead === undefined) return undefined
+  return Math.round(usage.cacheRead / totalInput * 100)
+}
+
 function UsageRows({ usage, t }: { usage: TrajectoryUsage | undefined; t: TrajectoryTranslate }) {
   if (usage === undefined) return <p className={css.noPayload}>{t('usage.notReported')}</p>
   const totalInput = inputTotal(usage)
+  const cacheHit = cacheHitPercent(usage, totalInput)
   const otherOutput = usage.output !== undefined && usage.reasoning !== undefined
     ? usage.output - usage.reasoning
     : undefined
@@ -780,6 +786,12 @@ function UsageRows({ usage, t }: { usage: TrajectoryUsage | undefined; t: Trajec
     <dl className={css.overview}>
       {totalInput !== undefined && (
         <div><dt>{t('usage.input')}</dt><dd>{t('unit.tokens', { value: totalInput })}</dd></div>
+      )}
+      {cacheHit !== undefined && (
+        <div className={css.requestTokenDetail}>
+          <dt>{t('usage.cacheHit')}</dt>
+          <dd>{cacheHit}%</dd>
+        </div>
       )}
       {usage.cacheRead !== undefined && (
         <div className={css.requestTokenDetail}>

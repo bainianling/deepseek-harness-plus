@@ -240,6 +240,92 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.paths).toEqual(['/v1/responses'])
   })
 
+  it('sends an explicit cache mode only when a Responses route opts in', async () => {
+    const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        'acme-responses': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-responses',
+          baseURL: `${server.url}/v1`,
+          cacheRetention: 'none',
+          compat: { supportsExplicitPromptCacheMode: true },
+          models: [{ id: 'acme-cache', contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    })
+
+    await assemble(ctx, {
+      provider: 'acme-responses', model: 'acme-cache', messages: [], sessionId: 'explicit-cache' as never,
+    })
+
+    expect(server.requests[0]).toMatchObject({ prompt_cache_options: { mode: 'explicit' } })
+    expect(server.requests[0]).not.toHaveProperty('prompt_cache_key')
+  })
+
+  it('requests 24-hour cache retention only for an opted-in Responses route', async () => {
+    const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        'acme-responses': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-responses',
+          baseURL: `${server.url}/v1`,
+          cacheRetention: 'long',
+          compat: { supportsLongCacheRetention: true },
+          models: [{ id: 'acme-cache', contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    })
+
+    await assemble(ctx, {
+      provider: 'acme-responses', model: 'acme-cache', messages: [], sessionId: 'long-cache' as never,
+    })
+
+    expect(server.requests[0]).toMatchObject({
+      prompt_cache_key: expect.stringMatching(/^dsh-[a-f0-9]{32}$/),
+      prompt_cache_retention: '24h',
+    })
+    expect(server.requests[0]).not.toHaveProperty('prompt_cache_options')
+  })
+
+  it('routes equivalent OpenAI Responses prefixes to one cache key while preserving session affinity', async () => {
+    const server = await mockServer([
+      { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },
+      { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },
+      { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: { openai: { apiKeyEnv: 'PI_TEST_KEY', baseURL: `${server.url}/v1` } },
+    })
+    const shared = {
+      provider: 'openai',
+      model: 'gpt-4.1',
+      system: 'stable system prompt',
+      tools: [{
+        name: 'lookup',
+        description: 'look up a value',
+        parameters: { type: 'object', properties: { key: { type: 'string' } } },
+      }],
+    }
+
+    await assemble(ctx, { ...shared, messages: [], sessionId: 'session-one' as never })
+    await assemble(ctx, { ...shared, messages: [], sessionId: 'session-two' as never })
+    await assemble(ctx, { ...shared, system: 'changed system prompt', messages: [], sessionId: 'session-three' as never })
+
+    const requests = server.requests as { prompt_cache_key?: string }[]
+    expect(requests[0]?.prompt_cache_key).toMatch(/^dsh-[a-f0-9]{32}$/)
+    expect(requests[1]?.prompt_cache_key).toBe(requests[0]?.prompt_cache_key)
+    expect(requests[2]?.prompt_cache_key).not.toBe(requests[0]?.prompt_cache_key)
+    expect(server.headers.map(headers => headers.session_id)).toEqual(['session-one', 'session-two', 'session-three'])
+  })
+
   it('resolves attachment and filesystem services mounted after the adapter when dispatching an image', async () => {
     const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
     const attachmentId = AttachmentId(`sha256:${'a'.repeat(64)}`)

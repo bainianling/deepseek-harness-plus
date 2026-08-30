@@ -1640,6 +1640,7 @@ describe('built-in conversation node Definitions', () => {
         summary: [{ type: 'text', text: 'automatic summary' }],
         shadowedSeqs: [3, 4],
         shadowedTokenCount: 200,
+        usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 90, cacheWriteTokens: 5 },
       }),
       at(22, 'user/message', {
         ...textMessage('automatic-checkpoint', 'checkpoint'),
@@ -1654,7 +1655,11 @@ describe('built-in conversation node Definitions', () => {
       summaryEventSeq: 12,
     })
     const automatic = node(snapshot(compactions), 'compaction')
-    expect(automatic?.data).toMatchObject({ summary: 'automatic summary', summaryEventSeq: 21 })
+    expect(automatic?.data).toMatchObject({
+      summary: 'automatic summary',
+      summaryEventSeq: 21,
+      summaryUsage: { inputTokens: 10, cacheReadTokens: 90, cacheWriteTokens: 5 },
+    })
     expect(snapshot(compactions).nodes.values().filter(candidate => candidate.kind === 'compaction')).toHaveLength(1)
   })
 

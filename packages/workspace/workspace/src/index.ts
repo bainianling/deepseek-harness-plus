@@ -12,10 +12,10 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { DomainGlobal, KvTable } from '@deepseek-ai/dsh-storage-domain'
-import { WorkspaceEntity } from './entity.ts'
+import { WorkspaceAdoptInvalidError, WorkspaceEntity } from './entity.ts'
 import type { WorkspaceEntityHost } from './entity.ts'
 
-export { WorkspaceMoveInvalidError } from './entity.ts'
+export { WorkspaceAdoptInvalidError, WorkspaceMoveInvalidError } from './entity.ts'
 import { realpathNormalize } from './paths.ts'
 import { workspaceDomainSpec } from './spec.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from './spec.ts'
@@ -39,16 +39,32 @@ export function WorkspaceId(id: string): WorkspaceId {
 }
 
 /**
- * An archiveSession request named a session neither live nor in session
+ * An archive/delete request named a session neither live nor in session
  * persistence — a definite miss only; storage faults propagate as themselves.
  */
 export class WorkspaceUnknownSessionError extends Error {
   /**
    * @param sessionId - The unknown session id.
+   * @param action - the verb the rejection names, for an accurate message.
+   */
+  constructor(readonly sessionId: SessionId, action: 'archive' | 'delete' | 'move' = 'archive') {
+    super(`cannot ${action} session '${sessionId}': live sessions and session persistence hold no such session`)
+    this.name = 'WorkspaceUnknownSessionError'
+  }
+}
+
+/**
+ * A deleteSession request named a LIVE session: its owner fiber still appends
+ * to the log, so deleting the durable artifact now would race that writer.
+ * The caller must close (or restart past) the live session first.
+ */
+export class WorkspaceLiveSessionError extends Error {
+  /**
+   * @param sessionId - The live session id.
    */
   constructor(readonly sessionId: SessionId) {
-    super(`cannot archive session '${sessionId}': live sessions and session persistence hold no such session`)
-    this.name = 'WorkspaceUnknownSessionError'
+    super(`cannot delete session '${sessionId}': it is live in this Host process; close it first`)
+    this.name = 'WorkspaceLiveSessionError'
   }
 }
 
@@ -104,6 +120,7 @@ export class WorkspaceRegistry extends Service {
   private readonly host: WorkspaceEntityHost = {
     table: () => this.requireTable(),
     sessionPath: id => this.sessionPaths.get(id),
+    hasSession: id => this.headers.has(id),
     readSessionHeader: id => this.readSessionHeader(id),
     rememberSessionPath: (id, path) => {
       this.sessionPaths.set(id, path)
@@ -255,6 +272,91 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * Durably delete one session: remove it from the global archive set, from
+   * every workspace's accounting, and from session persistence itself (its
+   * stored events cease to exist). A LIVE session rejects — its owner fiber
+   * still appends to the log, and a concurrent append would re-materialize a
+   * partial artifact; close it first. An unknown id rejects like archiving.
+   * The detach-before-delete order keeps every failure recoverable: if the
+   * persistence write fails, the session survives as an ungrouped row and the
+   * request can simply be retried.
+   * @param sessionId - The session to delete.
+   */
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      if (this.ctx.get('sessions')?.get(sessionId) !== undefined) {
+        throw new WorkspaceLiveSessionError(sessionId)
+      }
+      if (!(await this.sessionKnown(sessionId))) {
+        throw new WorkspaceUnknownSessionError(sessionId, 'delete')
+      }
+      const state = this.requireState()
+      const archivedSessionIds = state.archivedSessionIds.filter(id => id !== sessionId)
+      if (archivedSessionIds.length !== state.archivedSessionIds.length) {
+        await this.setState({ ...state, archivedSessionIds })
+      }
+      for (const entity of this.entities.values()) {
+        await entity.detachSession(sessionId)
+      }
+      await this.ctx.sessionPersistence.delete(sessionId)
+      // The header index must forget the deleted id, or the next
+      // `sessionKnown`/`readSessionHeader` would resurrect it from cache.
+      this.headers.delete(sessionId)
+      this.sessionPaths.delete(sessionId)
+      this.invalidSessionPaths.delete(sessionId)
+    })
+  }
+
+  /**
+   * Move one session into a target workspace's account, detaching it from
+   * every other account first — the one-owner invariant holds across the
+   * whole move because both halves ride one serialized operation.
+   *
+   * Unlike attach, membership in the target does not require the session's
+   * canonical cwd to equal the target path: an explicit move is user intent,
+   * so the target records the id as adopted and cwd-derived filtering never
+   * prunes it. A move within one workspace is still valid — detach from it,
+   * adopt back with the requested anchor — and reduces to a reorder. The
+   * anchor must already be accounted by the TARGET (it names where the
+   * session lands), which is why validation runs against that account even
+   * for a same-workspace move.
+   * @param sessionId - The live or persisted session to move.
+   * @param toWorkspaceId - Target workspace registration.
+   * @param beforeSessionId - Target-accounted anchor; omitted appends.
+   * @returns the updated target workspace.
+   */
+  async moveSession(
+    sessionId: SessionId,
+    toWorkspaceId: WorkspaceId,
+    beforeSessionId?: SessionId,
+  ): Promise<Workspace> {
+    return await this.enqueueOperation(async () => {
+      const target = this.entities.get(toWorkspaceId)
+      if (target === undefined) throw new WorkspaceOrderInvalidError(toWorkspaceId)
+      if (!(await this.sessionKnown(sessionId))) {
+        throw new WorkspaceUnknownSessionError(sessionId, 'move')
+      }
+      // The anchor is validated against the TARGET's visible account BEFORE
+      // any write: the detach pass below is unconditional, so a late anchor
+      // rejection would leave the session ungrouped instead of unmoved.
+      if (beforeSessionId !== undefined && !target.sessionIds.includes(beforeSessionId)) {
+        throw new WorkspaceAdoptInvalidError(
+          `cannot move session '${String(sessionId)}' before '${String(beforeSessionId)}' in workspace '${target.path}': `
+          + 'the anchor session is not accounted',
+        )
+      }
+      // Detach from EVERY account first (the target included — adopting back
+      // with an anchor then lands the session at its requested position), so
+      // the durable state never accounts one session twice, even mid-move.
+      for (const entity of this.entities.values()) {
+        await entity.detachSession(sessionId)
+      }
+      await target.adoptSession(sessionId, beforeSessionId)
+      return target
+    })
+  }
+
+  /**
    * Whether a session is live, header-indexed, or present in a fresh
    * persistence listing. Only a definite miss returns false — a failing
    * `sessionPersistence.list()` propagates so storage faults never
@@ -296,6 +398,7 @@ export class WorkspaceRegistry extends Service {
       path: canonical,
       title: workspaceName,
       sessionIds: [],
+      adoptedSessionIds: [],
       createdAt: now,
       updatedAt: now,
     }
@@ -461,6 +564,7 @@ export class WorkspaceRegistry extends Service {
           path: group.path,
           title: basename(group.path),
           sessionIds,
+          adoptedSessionIds: [],
           createdAt,
           updatedAt: createdAt,
         }
@@ -598,9 +702,13 @@ export class WorkspaceRegistry extends Service {
   private reportFilteredCandidates(): void {
     for (const entity of this.entities.values()) {
       const record = this.requireTable().get(entity.id) as WorkspaceRecord
+      const adopted = new Set(record.adoptedSessionIds)
       for (const sessionId of record.sessionIds) {
         const path = this.sessionPaths.get(sessionId)
         if (path === record.path) continue
+        // An adopted id's cwd mismatch is the explicit move working as
+        // intended, not a filtered candidate.
+        if (adopted.has(sessionId)) continue
         const reason = this.invalidSessionPaths.get(sessionId)
           ?? (this.headers.has(sessionId)
             ? `canonical cwd '${path}' differs from workspace path '${record.path}'`

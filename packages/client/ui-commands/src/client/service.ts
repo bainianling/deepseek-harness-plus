@@ -332,9 +332,15 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const refuseImages = (): never => {
       throw new Error(this.t('notice.imagesUnsupported', { command: name }))
     }
+    // Plain file attachments are never command payload: every command route
+    // refuses them outright, mirroring the claimed-phase pre-gate.
+    const refuseFiles = (): never => {
+      throw new Error(this.t('notice.filesUnsupported', { command: name }))
+    }
     const contribution = this.live.contributions.get(name)
     if (contribution !== undefined && contribution.available(session)) {
       if (!bare) return undefined
+      if ((envelope.files ?? 0) > 0) refuseFiles()
       if (envelope.images > 0) refuseImages()
       this.openPopup(name, contribution.ui, session, { via: 'enter', token })
       return 'handled'
@@ -347,16 +353,19 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     if (bare) {
       const decoration = this.live.decorations.get(name)
       if (decoration !== undefined && decoration.available(session)) {
+        if ((envelope.files ?? 0) > 0) refuseFiles()
         if (envelope.images > 0) refuseImages()
         this.openPopup(name, decoration.ui, session, { via: 'enter', token })
         return 'handled'
       }
     }
     if (desc.input !== undefined) {
+      if ((envelope.files ?? 0) > 0) refuseFiles()
       if (envelope.images > 0 && desc.input.images !== true) refuseImages()
       return { claim: this.leadingClaim(desc, session) }
     }
     if (!bare) return undefined
+    if ((envelope.files ?? 0) > 0) refuseFiles()
     if (envelope.images > 0) refuseImages()
     this.consumeVia(session.sessionId, { via: 'enter', token })
     this.runDetached(desc, session, trimmed)

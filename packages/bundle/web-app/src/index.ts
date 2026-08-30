@@ -12,6 +12,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { networkInterfaces } from 'node:os'
@@ -19,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { addHarnessSourceSection } from '@deepseek-ai/dsh-app-boot'
+import type { AppExit } from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
@@ -27,6 +29,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { FIRST_PARTY_SECTION_ORDER } from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-shell-env'
+import { registerKnowledgeRoutes } from './knowledge.ts'
+import { registerMarketRoutes } from './market.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'web-app'
@@ -56,6 +60,12 @@ export interface Config {
   surfaceContext: boolean
   /** Explicit `--trusted-host` authorities from this invocation. */
   trustedHosts: string[]
+  /** Local Hindsight API projected into the knowledge center. */
+  hindsightUrl: string
+  /** Hindsight bank projected into this Web GUI. */
+  hindsightBankId: string
+  /** Maximum duration of one Hindsight read. */
+  knowledgeTimeoutMs: number
 }
 
 export const Config: z<Config> = z.object({
@@ -63,14 +73,27 @@ export const Config: z<Config> = z.object({
   printUrl: z.boolean().default(true),
   surfaceContext: z.boolean().default(true),
   trustedHosts: z.array(String).default([]),
+  hindsightUrl: z.string().default('http://127.0.0.1:9077'),
+  hindsightBankId: z.string().default('coding-agent::deepseek-harness'),
+  knowledgeTimeoutMs: z.number().min(100).max(30_000).default(5_000),
 })
 
-/** Bind-dependent Web values shared by the trust fence and URL display. */
+/** Bind-dependent Web values shared by the trust fence and LAN sharing control. */
 export interface WebRuntimeValues {
   /** LAN IPv4 literals sampled once when the server binds all interfaces. */
   lanAddresses: string[]
-  /** LAN literals followed by explicit invocation authorities. */
+  /** Static invocation authorities only; LAN literals require explicit sharing. */
   trustedHosts: string[]
+}
+
+/** Mutable access state for explicitly enabled local-network sharing. */
+export interface LanShare {
+  /** Current enablement and the LAN addresses that can be shared. */
+  snapshot(): { enabled: boolean; addresses: readonly string[]; port: number }
+  /** Enable or disable access from the displayed LAN IP literals. */
+  setEnabled(enabled: boolean): { enabled: boolean; addresses: readonly string[]; port: number }
+  /** Current API trust entries: static values plus LAN IP literals while enabled. */
+  trustedHosts(): readonly string[]
 }
 
 /** Environment variable naming the canonical local URL of this Web GUI. */
@@ -133,12 +156,69 @@ try {
  * @returns the LAN display addresses and invocation-derived fence authorities.
  */
 export function resolveLanTrust(bindHost: string, extra: readonly string[]): WebRuntimeValues {
+  const privateIpv4 = (address: string): boolean => {
+    const [firstText = '', secondText = '', thirdText = '', fourthText = '', ...rest] = address.split('.')
+    if (rest.length !== 0) return false
+    const first = Number(firstText)
+    const second = Number(secondText)
+    const third = Number(thirdText)
+    const fourth = Number(fourthText)
+    if (![first, second, third, fourth].every(octet => Number.isInteger(octet) && octet >= 0 && octet <= 255)) return false
+    return first === 10
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)
+  }
+  const virtualInterface = /^(?:lo|utun|tun|tap|wg|docker|br-|vethernet|radmin|tailscale)/iu
   const lanAddresses = bindHost === ALL_INTERFACES_HOST
-    ? Object.values(networkInterfaces()).flat()
-      .filter((iface): iface is NonNullable<typeof iface> => iface !== undefined && iface.family === 'IPv4' && !iface.internal)
-      .map(iface => iface.address)
+    ? Object.entries(networkInterfaces())
+      .flatMap(([name, interfaces]) => (interfaces ?? []).map(iface => ({ name, iface })))
+      .filter(({ name, iface }) => iface.family === 'IPv4' && !iface.internal && !virtualInterface.test(name))
+      .sort((left, right) => Number(privateIpv4(right.iface.address)) - Number(privateIpv4(left.iface.address)))
+      .map(({ iface }) => iface.address)
     : []
-  return { lanAddresses, trustedHosts: [...lanAddresses, ...extra] }
+  return { lanAddresses, trustedHosts: [...extra] }
+}
+
+/** Whether a request came through the host's own loopback interface. */
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '')
+}
+
+/** Read an IPv4 Host header literal, rejecting a port-less or malformed authority. */
+function hostAddress(req: IncomingMessage): string | undefined {
+  const authority = req.headers.host
+  if (authority === undefined) return undefined
+  try {
+    return new URL(`http://${authority}`).hostname
+  } catch {
+    return undefined
+  }
+}
+
+/** Match a request authority against a deployment's explicit trusted-host entries. */
+function isExplicitTrustedHost(req: IncomingMessage, trustedHosts: readonly string[]): boolean {
+  const authority = req.headers.host?.toLowerCase()
+  const hostname = hostAddress(req)
+  return authority !== undefined && hostname !== undefined
+    && trustedHosts.some(entry => entry === authority || entry === hostname)
+}
+
+/** Browser-only local control requests must stay same-origin with the loopback GUI. */
+function isLocalControlRequest(req: IncomingMessage): boolean {
+  if (!isLoopbackRequest(req)) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(origin).hostname)
+  } catch {
+    return false
+  }
+}
+
+/** Minimal JSON response for the LAN-share control surface. */
+function writeLanShareSnapshot(res: ServerResponse, lanShare: LanShare, canControl: boolean): void {
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+  res.end(JSON.stringify({ ...lanShare.snapshot(), canControl }))
 }
 
 /** Model-visible orientation and acceptance boundary for sessions created through `dsh web`. */
@@ -228,12 +308,93 @@ export const internals: {
 
 /**
  * Mount the Web runtime: dist serving, surface prompt, the bash runtime
- * variable, the URL line, and the default-browser handoff.
+ * variable, the URL line, the default-browser handoff, and the opt-in LAN
+ * sharing control surface.
  * @param ctx - plugin context carrying the webServer service.
  * @param config - validated {@link Config}.
  */
 export function apply(ctx: Context, config: Config): void {
   const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
+  registerKnowledgeRoutes(ctx, config)
+  registerMarketRoutes(ctx)
+  let enabled = false
+  const lanShare: LanShare = {
+    snapshot: () => ({ enabled, addresses: runtime.lanAddresses, port: ctx.webServer.port }),
+    setEnabled: (next) => {
+      enabled = next && runtime.lanAddresses.length > 0
+      return lanShare.snapshot()
+    },
+    trustedHosts: () => enabled ? [...runtime.trustedHosts, ...runtime.lanAddresses] : runtime.trustedHosts,
+  }
+  ctx.provide('lanShare', lanShare)
+  // The listener remains reachable only by loopback until the local operator
+  // explicitly enables sharing; IP literals also prevent DNS-rebinding hosts.
+  ctx.effect(() => ctx.webServer.guard((req) => {
+    if (isLoopbackRequest(req) || isExplicitTrustedHost(req, runtime.trustedHosts)) return true
+    return lanShare.snapshot().enabled && runtime.lanAddresses.includes(hostAddress(req) ?? '')
+  }), 'web-app: LAN access guard')
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/lan-share',
+    handler: (req, res) => {
+      if (req.method === 'GET') {
+        writeLanShareSnapshot(res, lanShare, isLocalControlRequest(req))
+        return
+      }
+      if (req.method !== 'POST' || !isLocalControlRequest(req)) {
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (chunk: string) => { body += chunk })
+      req.once('end', () => {
+        try {
+          const value = JSON.parse(body) as { enabled?: unknown }
+          if (typeof value.enabled !== 'boolean') throw new Error('invalid body')
+          lanShare.setEnabled(value.enabled)
+          writeLanShareSnapshot(res, lanShare, true)
+        } catch {
+          res.writeHead(400)
+          res.end('invalid request')
+        }
+      })
+      req.once('error', () => {
+        if (!res.headersSent) {
+          res.writeHead(400)
+          res.end('invalid request')
+        }
+      })
+    },
+  }), 'web-app: LAN share control')
+  // The GUI's server-stop control: a loopback-only, same-origin POST that
+  // requests the launcher's bounded process exit once the ack is flushed.
+  // The graceful path disposes the whole application tree (sockets, sessions,
+  // plugins) before the process ends — killing the listener directly would
+  // skip that teardown.
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/server/shutdown',
+    handler: (req, res) => {
+      if (req.method !== 'POST' || !isLocalControlRequest(req)) {
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
+      const appExit = ctx.get('appExit') as AppExit | undefined
+      if (appExit === undefined) {
+        res.writeHead(503)
+        res.end('shutdown unavailable')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ ok: true }))
+      // Flush the ack before teardown starts, so the browser sees success
+      // while the disposal (and its connection drops) run behind it.
+      setTimeout(() => { appExit(0) }, 150)
+    },
+  }), 'web-app: server shutdown control')
   // The loopback URL belongs to this host. Under SSH, the operator reaches it
   // through a local forwarding address that this process cannot derive.
   const handoffBrowser = config.openBrowser && !launchedThroughSsh(ctx)
@@ -270,15 +431,9 @@ export function apply(ctx: Context, config: Config): void {
         if (ANNOUNCED_ROOTS.has(connectionCtx.root)) return
         const webUrl = localWebUrl(connectionCtx)
         const authenticatedUrl = connectionCtx.connection.authenticatedUrl(webUrl)
-        // Reuse the exact LAN snapshot provided to the /api trust fence.
-        const lanCandidate = runtime.lanAddresses[0]
-        const port = connectionCtx.webServer.port
-        const lanUrl = lanCandidate === undefined
-          ? undefined
-          : connectionCtx.connection.authenticatedUrl(`http://${lanCandidate}:${String(port)}`)
         ANNOUNCED_ROOTS.add(connectionCtx.root)
         if (config.printUrl) {
-          console.log(`dsh web: ${authenticatedUrl}${lanUrl === undefined ? '' : ` (LAN: ${lanUrl})`}`)
+          console.log(`dsh web: ${authenticatedUrl}`)
         }
         if (handoffBrowser) {
           console.log('dsh web: opening the default browser; pass --no-open to disable')

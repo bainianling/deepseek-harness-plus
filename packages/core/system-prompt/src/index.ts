@@ -124,8 +124,8 @@ export interface PromptAssembly {
  *
  * Adjacent values differ by at least ten to keep the first-party groups sparse
  * and make accidental collisions mechanically detectable.
- * External plugins may use any finite order; equal orders are deterministic by
- * section name.
+ * External plugins may use any finite order; equal orders are deterministic
+ * by section name, with the deployment persona leading its order tie.
  */
 export const FIRST_PARTY_SECTION_ORDER = {
   HARNESS_IDENTITY: -1000,
@@ -223,14 +223,26 @@ function compareNames(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Order prompt sections by their explicit placement, then deterministically by name. */
+/** Keep the deployment persona as the first equal-order section, then canonicalize ties by name. */
 function comparePromptSections(a: PromptSection, b: PromptSection): number {
-  return a.order - b.order || compareNames(a.name, b.name)
+  const byOrder = a.order - b.order
+  if (byOrder !== 0) return byOrder
+  if (a.name === PERSONA_SECTION) return -1
+  if (b.name === PERSONA_SECTION) return 1
+  return compareNames(a.name, b.name)
 }
 
 /** Order tool schemas lexicographically by name. */
 function compareToolNames(a: ToolSchema, b: ToolSchema): number {
   return compareNames(a.name, b.name)
+}
+
+/** Recursively normalize JSON-object key order without changing semantic array order. */
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeJson)
+  if (typeof value !== 'object' || value === null) return value
+  return Object.fromEntries(Object.entries(value).sort(([left], [right]) => compareNames(left, right))
+    .map(([key, entry]) => [key, canonicalizeJson(entry)]))
 }
 
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.persona} for its contract). */
@@ -546,7 +558,7 @@ export class SystemPrompt extends Service {
       const schemas = result.schemas.map(({ name, description, parameters }): ToolSchema => ({
         name,
         description,
-        parameters: structuredClone(parameters),
+        parameters: canonicalizeJson(structuredClone(parameters)) as Record<string, unknown>,
       }))
       const acceptedKnownNames = result.knownNames ?? schemas.map(tool => tool.name)
       collected.push(...schemas)
@@ -572,7 +584,7 @@ export class SystemPrompt extends Service {
       contexts: runtimeContextSuppressed
         ? []
         : [...contextByName.values()]
-          .sort((a, b) => a.order - b.order)
+          .sort((a, b) => a.order - b.order || compareNames(a.name, b.name))
           .map(entry => ({
             name: entry.name,
             text: typeof entry.text === 'function' ? entry.text(context) : entry.text,
