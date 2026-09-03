@@ -112,6 +112,47 @@
   border: 1px solid var(--dsw-alias-border-l1);
 }
 
+/* 浮光 dedicated link card: an accent border + icon chip mark it out as the
+   app integration among the generic studio controls. */
+.fuguangCard {
+  border-color: color-mix(in srgb, var(--dsw-alias-label-primary-bluish) 45%, var(--dsw-alias-border-l1));
+}
+
+.fuguangCard audio {
+  width: 100%;
+  height: 36px;
+}
+
+.fuguangIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--dsw-alias-label-primary-bluish);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.select {
+  flex: 1;
+  min-width: 180px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--dsw-alias-border-l2);
+}
+
 .cardHead {
   display: flex;
   align-items: center;
@@ -228,6 +269,23 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+/* Inline recording feedback: picker hints while waiting, red on failure. */
+.recordNote {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 166, 35, 0.5);
+  background: rgba(245, 166, 35, 0.08);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.recordNote[data-error] {
+  border-color: rgba(229, 72, 77, 0.5);
+  background: rgba(229, 72, 77, 0.08);
+  color: #e5484d;
 }
 
 .sliderRow {

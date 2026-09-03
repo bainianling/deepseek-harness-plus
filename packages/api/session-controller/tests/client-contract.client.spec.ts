@@ -1,15 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { PromptContentPart as AttachmentPromptContentPart } from '@deepseek-ai/dsh-attachment/types'
 import {
   MutableSessionEventSource, type SessionLiveEventEntry,
 } from '../src/client/contract/events.ts'
-import { transportResult } from '../src/client/contract/result.ts'
+import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type { PromptContentPart as SessionPromptContentPart } from '../src/types.ts'
 
 function entry(seq: number): SessionLiveEventEntry {
   return {
     type: 'event',
     event: {
       type: 'turn/start',
-      seq,
+      seq: SessionSeq(seq),
       time: seq,
       data: { turn: seq },
     },
@@ -17,6 +19,13 @@ function entry(seq: number): SessionLiveEventEntry {
 }
 
 describe('Client Session contracts', () => {
+  it('keeps attachment intake parts assignable into its catalog-visible prompt parts', () => {
+    // The local file-upload adaptation intentionally extends the session
+    // vocabulary with a `file` part beyond the attachment intake; the intake
+    // vocabulary itself must stay embedded verbatim.
+    expectTypeOf<AttachmentPromptContentPart>().toMatchTypeOf<SessionPromptContentPart>()
+  })
+
   it('publishes exact replace, prepend, and append event-window changes', () => {
     const feed = new MutableSessionEventSource()
     const listener = vi.fn()
@@ -76,14 +85,4 @@ describe('Client Session contracts', () => {
     expect(iterate).toHaveBeenCalledOnce()
   })
 
-  it('folds Error and non-Error carrier rejections into Client failures', () => {
-    expect(transportResult(new Error('transport unavailable'))).toEqual({
-      ok: false,
-      error: { code: 'internal', message: 'transport unavailable', details: {} },
-    })
-    expect(transportResult(404)).toEqual({
-      ok: false,
-      error: { code: 'internal', message: '404', details: {} },
-    })
-  })
 })

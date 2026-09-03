@@ -8,16 +8,18 @@ describe('resolveConfig', () => {
     const config = resolveConfig({})
     expect(config.enabled).toBe(true)
     expect(config.intervalHours).toBe(24)
-    expect(config.maxItems).toBe(400)
+    expect(config.maxItems).toBe(800)
     expect(config.platforms).toEqual(['bilibili', 'douyin', 'xiaohongshu', 'x', 'rss'])
     expect(config.xAccounts).toContain('OpenAI')
+    expect(config.xAccounts.length).toBeGreaterThanOrEqual(16)
     expect(config.proxy).toBe('')
     expect(config.dataDir.endsWith('ai-news')).toBe(true)
+    expect(config.douyinAuthProfileId).toBe('douyin')
     expect(config.translateEnabled).toBe(true)
     expect(config.translateApiKeyEnv).toBe('DASHSCOPE_API_KEY')
     expect(config.translateBaseUrl).toContain('dashscope')
     expect(config.translateModel).toBe('qwen-turbo')
-    expect(config.translateMaxPerCrawl).toBe(80)
+    expect(config.translateMaxPerCrawl).toBe(240)
   })
 
   it('accepts explicit overrides', () => {
@@ -55,13 +57,13 @@ describe('resolveConfig', () => {
   it('survives non-object input', () => {
     const config = resolveConfig(undefined)
     expect(config.enabled).toBe(true)
-    expect(resolveConfig('nonsense').maxItems).toBe(400)
+    expect(resolveConfig('nonsense').maxItems).toBe(800)
   })
 
   it('rejects non-positive numbers in favor of defaults', () => {
     const config = resolveConfig({ intervalHours: -3, maxItems: 0, crawlTimeoutMs: Number.NaN })
     expect(config.intervalHours).toBe(24)
-    expect(config.maxItems).toBe(400)
+    expect(config.maxItems).toBe(800)
     expect(config.crawlTimeoutMs).toBe(300_000)
   })
 })

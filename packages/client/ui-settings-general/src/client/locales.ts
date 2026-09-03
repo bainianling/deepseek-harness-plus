@@ -11,6 +11,12 @@ export const zh = {
   'stopServer': '停止服务',
   'stopServer.confirm': '再点一次确认停止',
   'stopServer.stopping': '正在停止服务…',
+  'connection.error': '连接异常',
+  'connection.retry': '立即重连',
+  'connection.connecting': '连接中',
+  'connection.connected': '连接成功',
+  'connection.reconnect': '连接异常，点击立即重连',
+  'connection.restart': '连接中，点击立即重连',
 } satisfies Record<string, string>
 
 /** The settings namespace key union. */
@@ -27,4 +33,10 @@ export const en = {
   'stopServer': 'Stop server',
   'stopServer.confirm': 'Click again to stop',
   'stopServer.stopping': 'Stopping the server…',
+  'connection.error': 'Disconnected',
+  'connection.retry': 'Reconnect now',
+  'connection.connecting': 'Connecting',
+  'connection.connected': 'Connected',
+  'connection.reconnect': 'Disconnected, reconnect now',
+  'connection.restart': 'Connecting, restart now',
 } satisfies Record<SettingsKey, string>

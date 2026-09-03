@@ -7,10 +7,10 @@
  */
 
 import z from '@deepseek-ai/schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 
 /** Settings namespace carrying the user-owned context-length override. */
-export const COMPACTION_SETTINGS_NAMESPACE = settingsNamespace('compaction')
+export const COMPACTION_SETTINGS_NAMESPACE = 'compaction' as SettingsNamespace
 
 /**
  * The compaction fields a user owns at runtime. Both are optional absolute

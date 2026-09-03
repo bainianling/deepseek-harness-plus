@@ -98,7 +98,7 @@ The Knowledge section never calls Hindsight directly from the browser. [`src/kno
 | [`src/knowledge.ts`](src/knowledge.ts) | Read-only Hindsight adapter and stable `/api/knowledge` projection for the Knowledge section |
 | [`src/startup.ts`](src/startup.ts) | The `web-startup` provider: `--host`, `--port`, `--trusted-host`, `--no-open`, `--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | The web patch: restated base values, web host rows, browser roster, agent plane behind presets |
-| [`src/invariant.ts`](src/invariant.ts) | Invariant companion: no runtime invariant; every contribution is registry-disposed |
+| — | No runtime invariant companion is published; every contribution (frontend-static child plugin, prompt section, bashEnv registration) is registry-disposed with the fiber, and each owning registry's package carries that relation's invariant; the package holds no mutable state of its own to audit. |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | Dist resolution, fallback seat, prompt sections, readiness |
 | [`tests/knowledge.spec.ts`](tests/knowledge.spec.ts) | Tree flattening, health projection, offline response, and page-ID validation |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | Command-line parsing over a real Loader tree |
@@ -107,7 +107,7 @@ The Knowledge section never calls Hindsight directly from the browser. [`src/kno
 
 ### Invariant ownership
 
-The invariant companion registers an empty installer because every contribution — the frontend-static child plugin, the prompt sections, and the bash variable registration — is registry-disposed with the fiber, and each owning registry's package carries that relation's invariant.
+No invariant companion is published because every contribution — the frontend-static child plugin, the prompt sections, and the bash variable registration — is registry-disposed with the fiber, and each owning registry package carries that relation's invariant.
 
 </details>
 

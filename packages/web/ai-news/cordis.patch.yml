@@ -9,9 +9,10 @@
 # them; every other source is fetched directly.
 #
 # Auto-translation: after each crawl, English titles/summaries (X posts and
-# the overseas RSS feeds) are translated into Chinese through an
-# OpenAI-compatible chat endpoint (DashScope by default; the key is read from
-# the `translateApiKeyEnv` environment variable). Set `translateEnabled: false`
+# the overseas RSS feeds) are translated into Chinese through the Harness
+# default model route; when no model route is available it falls back to an
+# OpenAI-compatible chat endpoint (DashScope by default, key read from the
+# `translateApiKeyEnv` environment variable). Set `translateEnabled: false`
 # to turn it off, or override `translateModel` / `translateBaseUrl`.
 - insert:
     - id: ai-news
@@ -20,9 +21,10 @@
       config:
         enabled: true
         intervalHours: 24
-        maxItems: 400
+        maxItems: 800
         proxy: ''
         platforms: [bilibili, douyin, xiaohongshu, x, rss]
         translateEnabled: true
         translateApiKeyEnv: DASHSCOPE_API_KEY
         translateModel: qwen-turbo
+        translateMaxPerCrawl: 240

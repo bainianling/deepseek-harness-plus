@@ -12,10 +12,19 @@ import { keyFromIconUrl, signWbi } from '../wbi.ts'
 import { withinDays, type CrawlContext, type PlatformCrawler } from './context.ts'
 
 /** Search keywords; each becomes one signed query. */
-const SEARCH_KEYWORDS: readonly string[] = ['AI大模型', '人工智能', 'DeepSeek', 'OpenAI']
+const SEARCH_KEYWORDS: readonly string[] = [
+  'AI大模型', '人工智能', 'DeepSeek', 'OpenAI', 'ChatGPT', 'Claude',
+  'Gemini', 'Sora', '智能体', 'AIGC', '机器学习',
+]
 
-/** Videos admitted per keyword query. */
-const MAX_PER_KEYWORD = 12
+/** Result pages fetched per keyword (each page ~42 videos, sorted by publish date). */
+const PAGES_PER_KEYWORD = 2
+
+/** Videos admitted per keyword (deduped across keywords downstream). */
+const MAX_PER_KEYWORD = 40
+
+/** Concurrent keyword queries — B站 rate-limits aggressive bursts. */
+const KEYWORD_CONCURRENCY = 3
 
 const SEARCH_API = 'https://api.bilibili.com/x/web-interface/wbi/search/type'
 const REFERER = 'https://www.bilibili.com/'
@@ -78,8 +87,8 @@ export function normalizeBiliPic(pic: string): string {
   return pic
 }
 
-async function searchKeyword(ctx: CrawlContext, keyword: string, keys: { imgKey: string; subKey: string }, buvid: Buvid | undefined): Promise<NewsItem[]> {
-  const query = signWbi({ keyword, order: 'pubdate', page: 1, search_type: 'video' }, keys.imgKey, keys.subKey)
+async function searchKeyword(ctx: CrawlContext, keyword: string, page: number, keys: { imgKey: string; subKey: string }, buvid: Buvid | undefined): Promise<NewsItem[]> {
+  const query = signWbi({ keyword, order: 'pubdate', page, search_type: 'video' }, keys.imgKey, keys.subKey)
   const response = await ctx.fetchSmart(`${SEARCH_API}?${query}`, {
     headers: {
       'user-agent': CRAWL_USER_AGENT,
@@ -116,6 +125,17 @@ async function searchKeyword(ctx: CrawlContext, keyword: string, keys: { imgKey:
   return items
 }
 
+/** One page fetch with a short settle gap, bounded by the keyword worker pool. */
+async function fetchPage(ctx: CrawlContext, keyword: string, page: number, keys: { imgKey: string; subKey: string }, buvid: Buvid | undefined): Promise<NewsItem[]> {
+  const items = await searchKeyword(ctx, keyword, page, keys, buvid)
+  await sleep(150)
+  return items
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => { setTimeout(resolve, ms) })
+}
+
 /** The bilibili platform adapter. */
 export const bilibiliCrawler: PlatformCrawler = {
   platform: 'bilibili',
@@ -123,9 +143,26 @@ export const bilibiliCrawler: PlatformCrawler = {
   async crawl(ctx: CrawlContext): Promise<NewsItem[]> {
     const [buvid, keys] = await Promise.all([fetchBuvid(ctx), fetchWbiKeys(ctx)])
     if (keys === undefined) throw new Error('bilibili: wbi keys unavailable')
-    const perKeyword = await Promise.all(SEARCH_KEYWORDS.map(keyword => searchKeyword(ctx, keyword, keys, buvid)))
+    const tasks = SEARCH_KEYWORDS.flatMap(keyword =>
+      Array.from({ length: PAGES_PER_KEYWORD }, (_, index) => fetchPage(ctx, keyword, index + 1, keys, buvid)))
+    const results: NewsItem[][] = []
+    let cursor = 0
+    const workers = Array.from({ length: KEYWORD_CONCURRENCY }, async () => {
+      while (cursor < tasks.length) {
+        const index = cursor
+        cursor += 1
+        const task = tasks[index]
+        if (task === undefined) continue
+        try {
+          results.push(await task)
+        } catch {
+          // One failed page never aborts the whole keyword set.
+        }
+      }
+    })
+    await Promise.all(workers)
     const byId = new Map<string, NewsItem>()
-    for (const items of perKeyword) {
+    for (const items of results) {
       for (const item of items) {
         const existing = byId.get(item.id)
         if (existing === undefined || item.aiScore > existing.aiScore) byId.set(item.id, item)

@@ -10,11 +10,12 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveConfig } from './config.ts'
 import { NewsCrawler, type NewsLogger } from './crawl.ts'
+import type { DouyinSearchHit } from './crawlers/context.ts'
 import { detectSystemProxy, parseProxy } from './http.ts'
 import { MediaCache, MEDIA_ROUTE_PREFIX } from './media.ts'
 import { NewsStore } from './store.ts'
@@ -39,6 +40,39 @@ interface WebServerLike {
 /** Structural default-model service used without a hard plugin dependency. */
 interface DefaultModelLike {
   currentSelection(): TranslationModelSelection
+}
+
+/** Structural dsh-browser surface used without a hard plugin dependency. */
+interface BrowserLike {
+  status(): Promise<{ enabled: boolean; authProfiles: { id: string }[]; activeUrl?: string }>
+  open(url: string, opts?: { waitMs?: number; authProfile?: string }): Promise<{ url: string; title: string; screenshotPath?: string }>
+  closePage(): Promise<void>
+  searchResults(
+    url: string,
+    spec: { item: string; title?: string; link?: string; text?: string },
+    opts?: { authProfile?: string; count?: number; waitMs?: number },
+  ): Promise<{ url: string; title: string; snippet?: string }[]>
+}
+
+/** Cookie names that prove a Douyin web session is logged in. */
+const DOUYIN_SESSION_COOKIES: readonly string[] = ['sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt']
+
+/** Whether a Playwright storageState file carries a live Douyin session. */
+export function douyinStateLoggedIn(statePath: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, 'utf8')) as {
+      cookies?: { name?: string; value?: string; domain?: string }[]
+    }
+    const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : []
+    return cookies.some(cookie =>
+      cookie.name !== undefined
+      && DOUYIN_SESSION_COOKIES.includes(cookie.name)
+      && cookie.value !== undefined
+      && cookie.value !== ''
+      && (cookie.domain ?? '').includes('douyin'))
+  } catch {
+    return false
+  }
 }
 
 /** The `aiNews` service surface other rows may use. */
@@ -130,7 +164,22 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   }
   const llm = ctx.get('llm') as TranslationLlm | undefined
   const defaultModel = ctx.get('agentDefaultModel') as DefaultModelLike | undefined
+  /** Resolved lazily: the browser row may register after this plugin applies. */
+  const getBrowser = (): BrowserLike | undefined => ctx.get('browser') as BrowserLike | undefined
   const store = new NewsStore(config.dataDir, config.maxItems)
+  // Must match the dsh-browser `douyin` authProfile storageStatePath row.
+  const douyinAuthStatePath = join(config.dataDir, 'douyin-auth.json')
+  /** Login-based Douyin search; empty until the user completes panel login. */
+  const douyinSearchProvider = async (keyword: string): Promise<DouyinSearchHit[]> => {
+    const browser = getBrowser()
+    if (browser === undefined || !douyinStateLoggedIn(douyinAuthStatePath)) return []
+    const rows = await browser.searchResults(
+      `https://www.douyin.com/search/${encodeURIComponent(keyword)}?type=video`,
+      { item: 'li', title: 'a[href*="/video/"]', link: 'a[href*="/video/"]' },
+      { authProfile: config.douyinAuthProfileId, count: 20, waitMs: 1500 },
+    )
+    return rows.filter(row => row.url !== '' && row.title !== '')
+  }
   let crawler: NewsCrawler | undefined
   let disposed = false
 
@@ -148,7 +197,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     crawler = new NewsCrawler(store, media, config, proxy, logger, {
       ...(llm === undefined ? {} : { llm }),
       ...(model === undefined ? {} : { model }),
-    })
+    }, douyinSearchProvider)
     ctx.logger.info(`ai-news: ready at ${config.dataDir}${proxy === undefined ? ' (no proxy)' : ` (proxy ${proxy.host}:${String(proxy.port)})`}`)
     // Initial crawl when stale, then a half-hourly staleness check: a long
     // sleep timer would drift with suspend/hibernate, short checks are cheap.
@@ -217,6 +266,91 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       })
     },
   }), 'ai-news: refresh route')
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/api/ai-news/douyin/auth',
+    handler: (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        writeJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      void (async (): Promise<void> => {
+        const browser = getBrowser()
+        let profileConfigured = false
+        if (browser !== undefined) {
+          try {
+            const status = await browser.status()
+            profileConfigured = status.authProfiles.some(profile => profile.id === config.douyinAuthProfileId)
+          } catch {
+            // A failed status read simply reports the profile as unconfigured.
+          }
+        }
+        writeJson(res, 200, {
+          supported: browser !== undefined,
+          profileConfigured,
+          loggedIn: douyinStateLoggedIn(douyinAuthStatePath),
+        })
+      })().catch(() => {
+        writeJson(res, 500, { error: 'auth status unavailable' })
+      })
+    },
+  }), 'ai-news: douyin auth route')
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/api/ai-news/douyin/login',
+    handler: (req, res) => {
+      if (req.method !== 'POST' || !isLocalControlRequest(req)) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return
+      }
+      void readJsonBody(req, 4096).then(async () => {
+        const browser = getBrowser()
+        if (browser === undefined) {
+          writeJson(res, 503, { error: 'browser service unavailable' })
+          return
+        }
+        try {
+          const state = await browser.open('https://www.douyin.com/', { authProfile: config.douyinAuthProfileId, waitMs: 2000 })
+          writeJson(res, 200, { ok: true, url: state.url })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          writeJson(res, 502, { error: message.slice(0, 300) })
+        }
+      }).catch(() => {
+        writeJson(res, 400, { error: 'invalid request' })
+      })
+    },
+  }), 'ai-news: douyin login route')
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/api/ai-news/douyin/login/complete',
+    handler: (req, res) => {
+      if (req.method !== 'POST' || !isLocalControlRequest(req)) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return
+      }
+      void readJsonBody(req, 4096).then(async () => {
+        const browser = getBrowser()
+        if (browser === undefined) {
+          writeJson(res, 503, { error: 'browser service unavailable' })
+          return
+        }
+        try {
+          // Closing the page persists the profile state (persistState: true).
+          await browser.closePage()
+          writeJson(res, 200, { loggedIn: douyinStateLoggedIn(douyinAuthStatePath) })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          writeJson(res, 502, { error: message.slice(0, 300) })
+        }
+      }).catch(() => {
+        writeJson(res, 400, { error: 'invalid request' })
+      })
+    },
+  }), 'ai-news: douyin login complete route')
 
   ctx.effect(() => webServer.register({
     kind: 'prefix',

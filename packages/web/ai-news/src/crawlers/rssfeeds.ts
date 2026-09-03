@@ -11,7 +11,7 @@ import type { NewsItem } from '../types.ts'
 import { withinDays, type CrawlContext, type PlatformCrawler } from './context.ts'
 
 /** Entries admitted per feed. */
-const MAX_PER_FEED = 6
+const MAX_PER_FEED = 15
 
 /** Freshness window for blog-style feeds. */
 const WINDOW_DAYS = 7
@@ -28,11 +28,19 @@ export interface FeedSpec {
 /** The default feed roster (verified reachable 2026-08). */
 export const DEFAULT_FEEDS: readonly FeedSpec[] = [
   { id: 'qbitai', label: '量子位', url: 'https://www.qbitai.com/feed', preferProxy: false },
+  { id: 'ithome', label: 'IT之家', url: 'https://www.ithome.com/rss/', preferProxy: false },
+  { id: 'solidot', label: 'Solidot', url: 'https://www.solidot.org/index.rss', preferProxy: false },
   { id: 'openai', label: 'OpenAI News', url: 'https://openai.com/news/rss.xml', preferProxy: true },
   { id: 'theverge-ai', label: 'The Verge AI', url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', preferProxy: false },
   { id: 'deepmind', label: 'DeepMind Blog', url: 'https://deepmind.google/blog/rss.xml', preferProxy: true },
   { id: 'huggingface', label: 'Hugging Face Blog', url: 'https://huggingface.co/blog/feed.xml', preferProxy: true },
   { id: 'mit-tr', label: 'MIT Tech Review AI', url: 'https://www.technologyreview.com/topic/artificial-intelligence/feed', preferProxy: true },
+  { id: 'venturebeat-ai', label: 'VentureBeat AI', url: 'https://venturebeat.com/category/ai/feed', preferProxy: true },
+  { id: 'techcrunch-ai', label: 'TechCrunch AI', url: 'https://techcrunch.com/category/artificial-intelligence/feed/', preferProxy: true },
+  { id: 'the-decoder', label: 'The Decoder', url: 'https://the-decoder.com/feed/', preferProxy: true },
+  { id: 'google-ai', label: 'Google AI Blog', url: 'https://blog.google/technology/ai/rss/', preferProxy: true },
+  { id: 'marktechpost', label: 'MarkTechPost', url: 'https://www.marktechpost.com/feed/', preferProxy: true },
+  { id: 'simonwillison', label: 'Simon Willison', url: 'https://simonwillison.net/atom/everything/', preferProxy: true },
 ]
 
 async function crawlOneFeed(ctx: CrawlContext, feed: FeedSpec): Promise<NewsItem[]> {

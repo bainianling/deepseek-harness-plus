@@ -2,7 +2,8 @@
 
 > **本仓库是个人二次修改版（Modified Fork），不是 DeepSeek 官方项目。**
 > 原版来源：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)，
-> 基线提交：`cd5ef8148158c3a752a658978873241fdf8e2bbc`（release `0.1.2-alpha.1`）。
+> 初始基线提交：`cd5ef8148158c3a752a658978873241fdf8e2bbc`（release `0.1.2-alpha.1`）。
+> 当前同步源码：`dsh-v0.1.2-alpha.5`（来源工作树提交 `3b479baa1cec71898a95684a3daa21f40934ac7f`，并包含其未提交的本地改动）。
 > 原版采用 [MIT License](LICENSE)（Copyright (c) 2026 DeepSeek），本仓库沿用 MIT 许可证并保留原始版权声明。
 > 使用前请务必阅读 [免责声明](DISCLAIMER.md)。
 
@@ -15,7 +16,7 @@
 DeepSeek Harness（`dsh`）是 DeepSeek 开源的「一切皆插件」Agent 运行框架（基于 [Cordis](https://github.com/cordiverse/cordis)），
 自带 Web GUI、CLI、Headless、ACP、Python SDK 等多种运行形态。
 
-本仓库在官方 `0.1.2-alpha.1` 版本之上做了大量二次修改，核心目标是：**把 Web GUI 从一个聊天界面扩展成一个多功能工作台**，
+本仓库以官方 `0.1.2-alpha.1` 为初始基线，并已同步上游至 `dsh-v0.1.2-alpha.5`；在此基础上继续保留本地二次修改。核心目标是：**把 Web GUI 从一个聊天界面扩展成一个多功能工作台**，
 新增了一批应用级功能分区（AI 实时新闻、技能市场、知识库、模型测试台、LoRA 训练工作室、虚拟软件公司、声线克隆、内置浏览器、内置终端、自动化任务等），
 并补充了壁纸、局域网共享开关、会话内切换 Agent preset、跨工作区移动对话、停止服务按钮、破甲（jailbreak）红队模式等增强。
 
@@ -30,7 +31,7 @@ DeepSeek Harness（`dsh`）是 DeepSeek 开源的「一切皆插件」Agent 运�
 | 📰 **AI 实时新闻** | 聚合 B 站、抖音、小红书、X（Twitter）热榜与多个 RSS 源（量子位、OpenAI News、The Verge AI、DeepMind、Hugging Face、MIT Tech Review 等），支持代理抓取与自动翻译 | `packages/web/ai-news/`、`NewsPanel` |
 | 🧩 **技能市场** | 只读公共开发者工具目录（skill / MCP / dsh-plugin），展示元数据、安装命令与风险评级；市场本身不安装、不执行任何内容 | `packages/bundle/web-app/src/market.ts`、`SkillMarketApp` |
 | 📚 **知识库** | 只读对接本地 Hindsight 记忆库的知识中心：文件夹/知识页树、检索与可视化浏览 | `packages/bundle/web-app/src/knowledge.ts`、`KnowledgeHubApp` |
-| 🧪 **模型测试台** | 同一提示词并发投喂多个模型路由，对比输出、时延与用量的 bench 工作台 | `packages/web/model-bench/`、`ModelBenchApp` |
+| 🧪 **模型测试台** | 同一提示词并发投喂多个模型路由，对比输出、时延与用量；支持编程/文档/识图/论文四类题目，以及 easy/medium/hard 严格难度分级、题目生成—作答—裁判流水线 | `packages/web/model-bench/`、`ModelBenchApp` |
 | 🎨 **LoRA 训练工作室** | 封装本机 LoRA 训练服务（`127.0.0.1:8918`，kohya sd-scripts）：底模管理 / 素材打标（WD14）/ 训练监控（loss 曲线、样图预览）/ 模型库与合并，四个工作台页签 | `LoraTrainApp` |
 | 🏢 **虚拟软件公司（Collab Studio）** | 多智能体协作分区：以「软件公司」角色分工编排多个 Agent 协同完成任务 | `packages/web/collab-studio/`、`CollabStudioApp` |
 | 🎙️ **声线克隆** | 对接本机 IndexTTS 语音服务（默认 `127.0.0.1:8917`，可在浏览器 localStorage 覆盖）的 TTS 工作台，附语音助手悬浮入口 | `VoiceCloneApp`、`VoiceAssistant` |
@@ -100,8 +101,8 @@ pnpm dsh web        # 打开 http://127.0.0.1:3080
 ## English summary
 
 This is a **personal modified fork** of [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
-(baseline commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`, release `0.1.2-alpha.1`, MIT License).
-It is **not** an official DeepSeek product.
+(initial baseline commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`, currently synced through
+`dsh-v0.1.2-alpha.5`, MIT License). It is **not** an official DeepSeek product.
 
 On top of the upstream agent harness, this fork extends the Web GUI into a multi-function workbench:
 AI news aggregation, a read-only skill marketplace, a Hindsight knowledge-center view, a multi-model

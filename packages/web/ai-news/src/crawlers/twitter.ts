@@ -11,10 +11,10 @@ import type { NewsItem } from '../types.ts'
 import { withinDays, type CrawlContext, type PlatformCrawler } from './context.ts'
 
 /** Tweets admitted per account. */
-const MAX_PER_ACCOUNT = 3
+const MAX_PER_ACCOUNT = 5
 
 /** Timeline freshness window (days). */
-const WINDOW_DAYS = 3
+const WINDOW_DAYS = 5
 
 /** Embed timeline host. */
 const SYNDICATION_BASE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/'
@@ -113,17 +113,37 @@ export function parseTweetDate(value: string | undefined): number {
   return Number.isNaN(timestamp) ? 0 : timestamp
 }
 
+/** Syndication timelines are rate-limited; fetch accounts in a small pool. */
+const ACCOUNT_CONCURRENCY = 4
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => { setTimeout(resolve, ms) })
+}
+
 /** The X platform adapter. */
 export const twitterCrawler: PlatformCrawler = {
   platform: 'x',
   label: 'X',
   async crawl(ctx: CrawlContext): Promise<NewsItem[]> {
-    const accounts = ctx.config.xAccounts.slice(0, 12)
-    const results = await Promise.allSettled(accounts.map(account => crawlAccount(ctx, account)))
+    const accounts = ctx.config.xAccounts.slice(0, 16)
+    const results: PromiseSettledResult<NewsItem[]>[] = new Array(accounts.length)
+    let cursor = 0
+    const workers = Array.from({ length: ACCOUNT_CONCURRENCY }, async () => {
+      while (cursor < accounts.length) {
+        const index = cursor
+        cursor += 1
+        const account = accounts[index]
+        if (account === undefined) continue
+        results[index] = await Promise.allSettled([crawlAccount(ctx, account)]).then(settled => settled[0]!)
+        await sleep(250)
+      }
+    })
+    await Promise.all(workers)
     const items: NewsItem[] = []
     let lastError: string | undefined
     let succeeded = 0
     for (const result of results) {
+      if (result === undefined) continue
       if (result.status === 'fulfilled') {
         items.push(...result.value)
         succeeded += 1

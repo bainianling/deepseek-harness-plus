@@ -5,9 +5,17 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { assignContestants, generateQuestion, judgeSubmissions, resetContestantDirs, runContestants, runContestPhase, BenchTimeoutError } from '../src/engine.ts'
+import { assignContestants, generateQuestion, judgeSubmissions, resetContestantDirs, runContestants, runContestPhase, BenchTimeoutError, scaleTimeout } from '../src/engine.ts'
 import { BenchStore } from '../src/store.ts'
 import type { BenchSlotDriver, ModelRoute, RoundRecord } from '../src/types.ts'
+
+describe('scaleTimeout', () => {
+  it('gives harder rounds larger phase budgets', () => {
+    expect(scaleTimeout(60_000, 'easy')).toBe(60_000)
+    expect(scaleTimeout(60_000, 'medium')).toBe(90_000)
+    expect(scaleTimeout(60_000, 'hard')).toBe(150_000)
+  })
+})
 
 interface RunCall {
   readonly slot: string
@@ -111,7 +119,7 @@ describe('bench engine', () => {
       expect(record.status).toBe('ready')
       expect(record.question?.title).toBe('两数之和')
       expect(record.question?.difficulty).toBe('hard')
-      expect(record.question?.passThreshold).toBe(6)
+      expect(record.question?.passThreshold).toBe(8)
       expect(driver.calls[0]?.prompt).toContain('题目难度：【hard】')
       expect(events.map(event => event.type)).toContain('round/question-ready')
       // Generator ran in the question directory on the default route.
@@ -304,6 +312,20 @@ describe('bench engine', () => {
       expect(await store.readRoundFile(record.id, `judgements/${slugs[0]}.md`)).toContain('BENCH_VERDICT')
       // The judge worked from the round directory.
       expect(driver.cwds.get(`j-${slugs[0]}`)).toBe(store.roundDir(record.id))
+    })
+
+    it('enforces the difficulty pass line even when the judge says yes', async () => {
+      const record = await readyRound()
+      Object.assign(record, { difficulty: 'hard' })
+      assignContestants(record, [{ provider: 'a', model: 'x' }], undefined)
+      const slug = Object.keys(record.contestants)[0]!
+      record.contestants[slug]!.status = 'done'
+      await store.save(record)
+      const driver = new FakeSlotDriver(() => '表面通过。\\n[BENCH_VERDICT] pass=YES score=7')
+      const { deps: engine } = deps(driver)
+      await judgeSubmissions(record, engine)
+      expect(record.contestants[slug]!.verdict).toEqual(expect.objectContaining({ pass: false, score: 7 }))
+      expect(record.stats?.passed).toBe(0)
     })
 
     it('records a non-passing verdict when the judge gives no marker', async () => {

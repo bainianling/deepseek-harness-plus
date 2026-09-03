@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CATEGORIES,
   contestantPrompt,
+  defaultPassThreshold,
   generatorPrompt,
   judgePrompt,
   parseBenchVerdict,
@@ -75,11 +76,29 @@ describe('prompt contracts', () => {
     const easy = generatorPrompt('coding', 'easy')
     const hard = generatorPrompt('document', 'hard')
     expect(easy).toContain('题目难度：【easy】')
-    expect(easy).toContain('约 8 分钟')
+    expect(easy).toContain('约 15 分钟')
+    expect(easy).toContain('至少 2 个明确边界')
+    expect(easy).toContain('默认 6')
     expect(easy).toContain('"difficulty": "easy"')
     expect(hard).toContain('题目难度：【hard】')
-    expect(hard).toContain('约 20 分钟')
+    expect(hard).toContain('约 50 分钟')
+    expect(hard).toContain('方案对比表')
+    expect(hard).toContain('默认 8')
     expect(hard).toContain('"difficulty": "hard"')
+  })
+
+  it('uses rising default pass thresholds for rising difficulty', () => {
+    expect(defaultPassThreshold('easy')).toBe(6)
+    expect(defaultPassThreshold('medium')).toBe(7)
+    expect(defaultPassThreshold('hard')).toBe(8)
+  })
+
+  it('strictly differentiates category requirements', () => {
+    expect(generatorPrompt('coding', 'hard')).toContain('至少 10^5 级别')
+    expect(generatorPrompt('coding', 'hard')).toContain('隐藏对抗测试')
+    expect(generatorPrompt('coding', 'easy')).not.toContain('至少 10^5 级别')
+    expect(generatorPrompt('vision', 'hard')).toContain('至少 6 个递进小问')
+    expect(generatorPrompt('paper', 'hard')).toContain('不少于 3000 字')
   })
 
   it('the contestant prompt embeds the question and ANSWER.md rule', () => {
@@ -89,12 +108,17 @@ describe('prompt contracts', () => {
     expect(prompt).toContain('20')
   })
 
-  it('the judge prompt demands the machine verdict marker', () => {
-    const meta = parseQuestionMeta({ title: 't', passThreshold: 6 })
-    const prompt = judgePrompt('coding', '题面', '参考答案', meta, 'runs/foo')
-    expect(prompt).toContain(VERDICT_MARKER)
-    expect(prompt).toContain('runs/foo')
-    expect(prompt).toContain('参考答案')
+  it('the judge prompt applies difficulty-specific strictness', () => {
+    const hardMeta = parseQuestionMeta({ title: 't', difficulty: 'hard', passThreshold: 8 })
+    const hardPrompt = judgePrompt('coding', '题面', '参考答案', hardMeta, 'runs/foo')
+    expect(hardPrompt).toContain(VERDICT_MARKER)
+    expect(hardPrompt).toContain('困难难度')
+    expect(hardPrompt).toContain('隐藏对抗测试失败')
+    expect(hardPrompt).toContain('runs/foo')
+    expect(hardPrompt).toContain('参考答案')
+
+    const unknownPrompt = judgePrompt('coding', '题面', '参考答案', parseQuestionMeta({}), 'runs/bar')
+    expect(unknownPrompt).toContain('未识别难度')
   })
 
   it('replyTail keeps short text and clips long text from the head', () => {

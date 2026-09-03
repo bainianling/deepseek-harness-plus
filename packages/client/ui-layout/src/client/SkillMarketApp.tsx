@@ -197,9 +197,9 @@ export function SkillMarketApp({ t }: { t: AppFrameProps['t'] }) {
           <div className={css.sourceHealth} aria-label="目录来源状态">
             <strong>{formatNumber(catalog?.items.length ?? 0)}</strong><span>收录</span>
             <strong>{onlineSources}</strong><span>来源在线</span>
-            <strong>{formatNumber(catalog?.translation.translated ?? 0)}</strong><span>已中文化</span>
+            <strong>{formatNumber(catalog?.translation?.translated ?? 0)}</strong><span>已中文化</span>
             {offlineSources > 0 && <span className={css.sourceWarning}>{offlineSources} 个来源离线</span>}
-            {(catalog?.translation.pending ?? 0) > 0 && <span className={css.sourceWarning}>{formatNumber(catalog?.translation.pending ?? 0)} 条待翻译</span>}
+            {(catalog?.translation?.pending ?? 0) > 0 && <span className={css.sourceWarning}>{formatNumber(catalog?.translation?.pending ?? 0)} 条待翻译</span>}
           </div>
           <button type="button" className={css.iconButton} aria-label="刷新市场" title="强制刷新市场目录（服务端每 30 分钟自动更新）" disabled={loading} onClick={() => { void load(true) }}>
             {loading ? <IconLoadingOutline16 size={16} /> : <IconRefreshOutline16 size={16} />}
@@ -208,7 +208,7 @@ export function SkillMarketApp({ t }: { t: AppFrameProps['t'] }) {
 
         <p className={css.refreshNote}>
           目录刷新于 {formatClock(catalog?.fetchedAt)} · 每 30 分钟自动更新
-          {catalog?.translation.engine === 'model' ? ' · 摘要由当前模型翻译' : catalog !== null ? ' · 未检测到可用模型，摘要为词典归一化' : ''}
+          {catalog?.translation?.engine === 'model' ? ' · 摘要由当前模型翻译' : catalog !== null ? ' · 未检测到可用模型，摘要为词典归一化' : ''}
         </p>
 
         <div className={css.toolbar}>

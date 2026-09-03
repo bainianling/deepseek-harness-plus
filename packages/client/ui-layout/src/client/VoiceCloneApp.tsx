@@ -16,6 +16,11 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AppFrameProps } from './AppFrame.tsx'
 import { VoiceAssistantApp, type VoiceAssistantParams } from './VoiceAssistant.tsx'
+import { VoiceFuguangCard } from './VoiceFuguangCard.tsx'
+import {
+  api, DEFAULT_ADVANCED, readServiceUrl, VOICE_LANGS as LANGS,
+  type SynthResult, type UploadedAudio, type UploadResponse, type VoiceStatus,
+} from './voiceService.ts'
 import css from './VoiceCloneApp.module.css'
 
 /** Emotion vector dimension order, matching IndexTTS-2.5 exactly. */
@@ -25,46 +30,10 @@ const EMOTION_KEYS = [
 ] as const
 
 /** Languages IndexTTS-2.5 synthesizes. */
-const LANGS = ['ZH', 'EN', 'JA', 'ES', 'AR'] as const
 type Lang = typeof LANGS[number]
 
 /** Emotion control mode ids shared with the service. */
 type EmoMode = 0 | 1 | 2 | 3
-
-interface VoiceStatus {
-  service?: string
-  busy?: boolean
-  model_loaded?: boolean
-  loading?: boolean
-  load_error?: string | null
-  use_qwen_emo?: boolean
-  gpu?: string
-  vram_total_gb?: number
-  vram_used_gb?: number
-  assistant?: { available?: boolean; model?: string }
-}
-
-interface UploadedAudio {
-  id: string
-  name: string
-  seconds: number | null
-  url: string
-}
-
-/** Raw /api/voice/upload response before the url is absolutized. */
-interface UploadResponse {
-  id: string
-  name: string
-  seconds: number | null
-  preview_url: string
-}
-
-interface SynthResult {
-  audio_name: string
-  audio_url: string
-  seconds: number | null
-  elapsed_seconds: number
-}
 
 interface HistoryEntry {
   name: string
@@ -74,51 +43,7 @@ interface HistoryEntry {
   preview: string
 }
 
-/** Default advanced sampling parameters (the webui defaults). */
-const DEFAULT_ADVANCED = {
-  do_sample: true,
-  top_p: 0.8,
-  top_k: 30,
-  temperature: 0.8,
-  length_penalty: 0,
-  num_beams: 3,
-  repetition_penalty: 10,
-  max_mel_tokens: 1500,
-  max_text_tokens_per_segment: 120,
-  interval_silence: 200,
-  text_normalization: true,
-}
-
-const DEFAULT_PORT_URL = 'http://127.0.0.1:8917'
-const START_COMMAND = 'F:\\deepseek-harness\\voice-clone\\start-voice-service.cmd'
-
-/** The service base URL, overridable through localStorage. */
-function readServiceUrl(): string {
-  try {
-    const stored = window.localStorage.getItem('dsh.voiceServiceUrl')
-    if (stored !== null && stored.trim() !== '' && /^https?:\/\//u.test(stored)) return stored.trim().replace(/\/+$/u, '')
-  } catch { /* storage unavailable */ }
-  return DEFAULT_PORT_URL
-}
-
-/** One JSON call against the voice service; non-2xx throws with the detail. */
-async function api<T>(base: string, path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(base + path, init)
-  } catch {
-    throw new Error('__offline__')
-  }
-  if (!response.ok) {
-    let detail = `${response.status}`
-    try {
-      const body = await response.json() as { detail?: unknown }
-      if (typeof body.detail === 'string') detail = body.detail
-    } catch { /* keep the status code */ }
-    throw new Error(detail)
-  }
-  return await response.json() as T
-}
+const START_COMMAND = 'voice-clone\\start-voice-service.cmd'
 
 /** Voice section props: only the shared locale translator arrives. */
 export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
@@ -132,7 +57,19 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
   const [emoAudio, setEmoAudio] = useState<UploadedAudio | null>(null)
   const [uploading, setUploading] = useState<{ ref: boolean; emo: boolean }>({ ref: false, emo: false })
   const [recordingTarget, setRecordingTarget] = useState<'ref' | 'emo' | null>(null)
+  /** Inline recording feedback (picker hints and failures), shown in the card. */
+  const [recordNote, setRecordNote] = useState<string | null>(null)
+  /** Recording source: the microphone or a system-audio (loopback) capture. */
+  const [recordSource, setRecordSource] = useState<'mic' | 'system'>(() => {
+    try { return window.localStorage.getItem('dsh.voiceRecordSource') === 'system' ? 'system' : 'mic' } catch { return 'mic' }
+  })
   const recorderRef = useRef<{ rec: MediaRecorder; chunks: Blob[] } | null>(null)
+
+  /** Persist the mic/system-audio recording source choice. */
+  const selectRecordSource = useCallback((source: 'mic' | 'system') => {
+    setRecordSource(source)
+    try { window.localStorage.setItem('dsh.voiceRecordSource', source) } catch { /* non-fatal */ }
+  }, [])
 
   const [text, setText] = useState('')
   const [lang, setLang] = useState<Lang>('ZH')
@@ -231,15 +168,42 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
     }
   }, [t, uploadFile])
 
-  /** MediaRecorder capture; the stop handler converts and uploads. */
+  /** MediaRecorder capture; the stop handler converts and uploads. The mic
+      uses getUserMedia; system audio records server-side through WASAPI
+      loopback (POST /api/voice/sysrec/*), no browser share picker involved. */
+  const sysRecordingRef = useRef<'ref' | 'emo' | null>(null)
   const startRecording = useCallback(async (target: 'ref' | 'emo') => {
+    setRecordNote(null)
+    if (recordSource === 'system') {
+      if (!onlineFlag) {
+        setRecordNote(t('voice.generate.needOnline'))
+        return
+      }
+      try {
+        await api(serviceUrl, '/api/voice/sysrec/start', { method: 'POST' })
+        sysRecordingRef.current = target
+        setRecordingTarget(target)
+        setRecordNote(t('voice.ref.systemRecording'))
+      } catch (error) {
+        setRecordNote(error instanceof Error && error.message !== '__offline__'
+          ? error.message
+          : t('voice.generate.needOnline'))
+      }
+      return
+    }
+    if (navigator.mediaDevices === undefined) {
+      // Insecure context (e.g. opened through a LAN IP over plain http) —
+      // media capture APIs do not exist there at all.
+      setRecordNote(t('voice.ref.unsupportedContext'))
+      return
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const rec = new MediaRecorder(stream)
+      const capture = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const rec = new MediaRecorder(capture)
       const chunks: Blob[] = []
       rec.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data) }
       rec.onstop = () => {
-        stream.getTracks().forEach(track => { track.stop() })
+        capture.getTracks().forEach(track => { track.stop() })
         const type = rec.mimeType !== '' ? rec.mimeType : 'audio/webm'
         const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'
         const file = new File([new Blob(chunks, { type })], `recording-${new Date().toISOString().replaceAll(':', '-')}.${ext}`, { type })
@@ -248,17 +212,36 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
       rec.start()
       recorderRef.current = { rec, chunks }
       setRecordingTarget(target)
-    } catch {
-      setGenNote(t('voice.ref.micError'))
-      setGenError(true)
+    } catch (error) {
+      setRecordNote(t('voice.ref.micError'))
+      console.warn('voice recording failed:', error)
     }
-  }, [handleUpload, t])
+  }, [handleUpload, onlineFlag, recordSource, serviceUrl, t])
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback(async () => {
+    const sysTarget = sysRecordingRef.current
+    if (sysTarget !== null) {
+      sysRecordingRef.current = null
+      setRecordingTarget(null)
+      try {
+        const uploaded = await api<UploadResponse>(serviceUrl, '/api/voice/sysrec/stop', { method: 'POST' })
+        const audio: UploadedAudio = {
+          id: uploaded.id, name: uploaded.name, seconds: uploaded.seconds, url: serviceUrl + uploaded.preview_url,
+        }
+        if (sysTarget === 'ref') setRefAudio(audio)
+        else setEmoAudio(audio)
+        setRecordNote(null)
+      } catch (error) {
+        setRecordNote(error instanceof Error && error.message !== '__offline__'
+          ? error.message
+          : t('voice.generate.needOnline'))
+      }
+      return
+    }
     recorderRef.current?.rec.stop()
     recorderRef.current = null
     setRecordingTarget(null)
-  }, [])
+  }, [serviceUrl, t])
 
   const loadModel = useCallback(async () => {
     setLoadError(null)
@@ -439,17 +422,40 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
           </Button>
           {!isRecording
             ? (
-              <Button
-                size="sm"
-                icon={<IconPlusOutline16 size={16} />}
-                disabled={!onlineFlag || isUploading || recordingTarget !== null}
-                onClick={() => { void startRecording(target) }}
-              >
-                {t('voice.ref.record')}
-              </Button>
+              <>
+                {/* Recording source toggle: microphone or system audio. */}
+                <div className={css.segmentRow} role="group" aria-label={t('voice.ref.sourceLabel')}>
+                  {([
+                    ['mic', 'voice.ref.source.mic', IconVoiceOutline16],
+                    ['system', 'voice.ref.source.system', IconPlayOutline16],
+                  ] as const).map(([source, key, Icon]) => (
+                    <button
+                      key={source}
+                      type="button"
+                      className={css.segment}
+                      data-active={recordSource === source || undefined}
+                      disabled={isUploading || recordingTarget !== null}
+                      title={t(key)}
+                      onClick={() => selectRecordSource(source)}
+                    >
+                      <Icon size={13} />
+                      {' '}
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  size="sm"
+                  icon={<IconPlusOutline16 size={16} />}
+                  disabled={!onlineFlag || isUploading || recordingTarget !== null}
+                  onClick={() => { void startRecording(target) }}
+                >
+                  {recordSource === 'system' ? t('voice.ref.recordSystem') : t('voice.ref.recordMic')}
+                </Button>
+              </>
             )
             : (
-              <Button size="sm" variant="outline" icon={<IconStopFill16 size={16} />} onClick={stopRecording}>
+              <Button size="sm" variant="outline" icon={<IconStopFill16 size={16} />} onClick={() => { void stopRecording() }}>
                 {t('voice.ref.stopRecord')}
               </Button>
             )}
@@ -467,6 +473,11 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
           )}
           {isUploading && <span className={css.fileName}>{t('voice.ref.uploading')}</span>}
         </div>
+        {recordNote !== null && (
+          <div className={css.recordNote} data-error={recordNote === t('voice.ref.systemRecording') ? undefined : true}>
+            {recordNote}
+          </div>
+        )}
         {value === null
           ? <div className={css.emptyBox}>{target === 'ref' ? t('voice.ref.empty') : t('voice.emo.audioNeedUpload')}</div>
           : (
@@ -523,6 +534,15 @@ export function VoiceCloneApp({ t }: { t: AppFrameProps['t'] }) {
             <div className={css.mono}>{START_COMMAND}</div>
           </div>
         )}
+
+        {/* 浮光 dedicated link: her reference voice + defaults for the app. */}
+        <VoiceFuguangCard
+          t={t}
+          serviceUrl={serviceUrl}
+          online={onlineFlag}
+          modelLoaded={modelLoaded}
+          status={status}
+        />
 
         {/* Model & VRAM: load/unload + emotion-text guidance option */}
         <div className={css.card}>

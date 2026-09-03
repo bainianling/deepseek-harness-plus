@@ -10,9 +10,9 @@
 
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { parseBenchVerdict, contestantPrompt, generatorPrompt, judgePrompt, parseQuestionMeta, replyTail } from './prompts.ts'
+import { defaultPassThreshold, parseBenchVerdict, contestantPrompt, generatorPrompt, judgePrompt, parseQuestionMeta, replyTail } from './prompts.ts'
 import type { BenchStore } from './store.ts'
-import type { BenchSlotDriver, ContestantRecord, ModelRoute, RoundRecord } from './types.ts'
+import type { BenchDifficulty, BenchSlotDriver, ContestantRecord, ModelRoute, RoundRecord } from './types.ts'
 
 /** Engine collaborators supplied by the host plugin. */
 export interface BenchEngineDeps {
@@ -46,6 +46,18 @@ const GEN_SLOT = 'gen'
 const CONTESTANT_SLOT = 'c-'
 /** Judge slot prefix. */
 const JUDGE_SLOT = 'j-'
+
+/** Harder authored questions receive a proportionally larger wall-clock budget. */
+export const DIFFICULTY_TIMEOUT_MULTIPLIERS: Readonly<Record<BenchDifficulty, number>> = {
+  easy: 1,
+  medium: 1.5,
+  hard: 2.5,
+}
+
+/** Scale a configured phase budget by the selected question difficulty. */
+export function scaleTimeout(baseMs: number, difficulty: BenchDifficulty): number {
+  return Math.max(1, Math.round(baseMs * DIFFICULTY_TIMEOUT_MULTIPLIERS[difficulty]))
+}
 
 /** Compose the round stop signal with one phase timeout. */
 function phaseSignal(deps: BenchEngineDeps, timeoutMs: number): { signal: AbortSignal; timedOut(): boolean } {
@@ -114,7 +126,7 @@ export async function generateQuestion(record: RoundRecord, deps: BenchEngineDep
   }
   await driver.ensureSlot(GEN_SLOT, store.questionDir(record.id))
   driver.setRoute(GEN_SLOT, record.generator)
-  const phase = phaseSignal(deps, deps.timeouts.generateMs)
+  const phase = phaseSignal(deps, scaleTimeout(deps.timeouts.generateMs, record.difficulty))
   let reply = ''
   try {
     reply = await driver.run(GEN_SLOT, generatorPrompt(record.category, record.difficulty, imageName), phase.signal)
@@ -141,7 +153,12 @@ export async function generateQuestion(record: RoundRecord, deps: BenchEngineDep
       return {}
     }
   })()
-  const meta = { ...parseQuestionMeta(metaRaw), difficulty: record.difficulty }
+  const parsedMeta = parseQuestionMeta(metaRaw)
+  const meta = {
+    ...parsedMeta,
+    difficulty: record.difficulty,
+    passThreshold: Math.max(parsedMeta.passThreshold, defaultPassThreshold(record.difficulty)),
+  }
   record.question = {
     title: meta.title,
     difficulty: record.difficulty,
@@ -209,14 +226,15 @@ export async function runContestants(record: RoundRecord, deps: BenchEngineDeps)
   delete record.finishedAt
   await store.save(record)
   const questionText = await store.readRoundFile(record.id, 'question/question.md')
-  const prompt = contestantPrompt(questionText, record.category, Math.round(deps.timeouts.contestantMs / 60000))
+  const contestantTimeoutMs = scaleTimeout(deps.timeouts.contestantMs, record.difficulty)
+  const prompt = contestantPrompt(questionText, record.category, Math.max(1, Math.round(contestantTimeoutMs / 60000)))
   const slugs = Object.keys(record.contestants)
   await deps.emit('round/running', { contestants: slugs.length })
   await Promise.all(slugs.map(async (slug) => {
     const contestant = record.contestants[slug]
     /* v8 ignore next -- the roster and the record are built together. */
     if (contestant === undefined) return
-    const phase = phaseSignal(deps, deps.timeouts.contestantMs)
+    const phase = phaseSignal(deps, contestantTimeoutMs)
     try {
       await stageRunDir(record, slug, store)
       const slot = `${CONTESTANT_SLOT}${slug}`
@@ -281,7 +299,12 @@ export async function judgeSubmissions(record: RoundRecord, deps: BenchEngineDep
       return {}
     }
   })()
-  const meta = { ...parseQuestionMeta(metaRaw), difficulty: record.difficulty }
+  const parsedMeta = parseQuestionMeta(metaRaw)
+  const meta = {
+    ...parsedMeta,
+    difficulty: record.difficulty,
+    passThreshold: Math.max(parsedMeta.passThreshold, defaultPassThreshold(record.difficulty)),
+  }
   const slugs = Object.keys(record.contestants)
   for (const slug of slugs) {
     deps.signal.throwIfAborted()
@@ -295,7 +318,7 @@ export async function judgeSubmissions(record: RoundRecord, deps: BenchEngineDep
       await deps.emit('judge/verdict', { slug, pass: false, score: null, reason: 'run failed' })
       continue
     }
-    const phase = phaseSignal(deps, deps.timeouts.judgeMs)
+    const phase = phaseSignal(deps, scaleTimeout(deps.timeouts.judgeMs, record.difficulty))
     const slot = `${JUDGE_SLOT}${slug}`
     let judgeText = ''
     let judgeError: string | undefined
@@ -314,9 +337,11 @@ export async function judgeSubmissions(record: RoundRecord, deps: BenchEngineDep
       : parsed === null
         ? `裁判未给出有效判定标记。原始评审摘要：${replyTail(judgeText, 600)}`
         : replyTail(judgeText, 2000)
+    const score = parsed?.score ?? null
+    const pass = parsed?.pass === true && score !== null && score >= meta.passThreshold
     contestant.verdict = {
-      pass: parsed?.pass ?? false,
-      score: parsed?.score ?? null,
+      pass,
+      score,
       comment,
     }
     await store.writeRoundFile(record.id, `judgements/${slug}.md`, judgeError !== undefined ? comment : judgeText)

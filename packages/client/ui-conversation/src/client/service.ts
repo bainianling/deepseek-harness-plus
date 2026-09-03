@@ -219,6 +219,7 @@ export class ConversationController extends Service implements IConversation {
       ? undefined
       : new Promise<PendingSubmissionRetirement>((resolve) => { finishRetiring = resolve })
     const submission = session.beginSubmission({
+      mode,
       text,
       images: imageAttachments.map(attachment => ({
         previewUrl: attachment.previewUrl,
@@ -340,7 +341,7 @@ export class ConversationController extends Service implements IConversation {
     if (!result.ok) {
       if (
         action.kind === 'steer'
-        && (result.error.code === 'steer-unavailable' || result.error.code === 'queue-item-not-found')
+        && (result.error.code === 'session/steer-unavailable' || result.error.code === 'session/queue-item-not-found')
       ) return
       throw new Error(`conversation.updateQueue failed: ${result.error.code}: ${result.error.message}`)
     }

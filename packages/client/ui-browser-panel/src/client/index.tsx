@@ -17,7 +17,7 @@ import { BrowserToggleButton } from './BrowserToggleButton.tsx'
 export { BrowserPanel } from './BrowserPanel.tsx'
 export { BrowserToggleButton } from './BrowserToggleButton.tsx'
 export { BrowserPanelProvider, useBrowserPanel } from './BrowserPanelContext.tsx'
-export { OPEN_URL_EVENT } from './BrowserPanelContext.tsx'
+export { OPEN_URL_EVENT, SHOW_PANEL_EVENT } from './BrowserPanelContext.tsx'
 export type { BrowserPanelBridge, BridgeHistoryRow, OpenUrlEventDetail } from './BrowserPanelContext.tsx'
 export type { BrowserScreenshot } from './contract/slots.ts'
 

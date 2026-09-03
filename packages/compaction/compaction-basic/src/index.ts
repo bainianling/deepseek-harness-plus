@@ -9,12 +9,12 @@ import z from '@deepseek-ai/schemastery'
 import { CompactionEngine, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
-import type { Session } from '@deepseek-ai/dsh-session'
-import { CONTEXT_WINDOW_EXCEEDED_CODE, assertNever } from '@deepseek-ai/dsh-llm'
+import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
+import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
+import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import {
@@ -127,7 +127,7 @@ const modelPolicy: z<ModelCompactPolicyConfig> = z.object({
  * token meter.
  */
 export class BasicCompactionEngine extends CompactionEngine {
-  static inject = ['llm', 'tokenMeter', 'sessions']
+  static inject = ['llm', 'tokenMeter', 'sessions', 'settings']
 
   static Config: z<BasicCompactionConfig> = z.object({
     thresholdRatio: thresholdRatioSchema,
@@ -166,31 +166,24 @@ export class BasicCompactionEngine extends CompactionEngine {
   private _installSettingsOverride(): void {
     if (settingsInstalled) return
     settingsInstalled = true
-    const entry: CompactionRuntimeOverride = {}
-    installSettingsSection(
-      this.ctx,
-      COMPACTION_SETTINGS_NAMESPACE,
-      COMPACTION_SETTINGS_SCHEMA,
-      entry,
-      {
-        // The schema admits each budget independently; refuse a section whose
-        // own budgets already conflict so the stored value stays actionable.
-        validate: (value) => {
-          const override = normalizeRuntimeOverride(value)
-          if (override.thresholdTokens !== undefined && override.retainTokens !== undefined
-            && override.retainTokens >= override.thresholdTokens) {
-            throw new Error(
-              `compaction settings: retainTokens (${override.retainTokens}) must be `
-              + `less than thresholdTokens (${override.thresholdTokens})`,
-            )
-          }
-        },
-        setSource: (current) => {
-          runtimeOverride.current = normalizeRuntimeOverride(current())
-        },
-        onChange: () => {},
+    const scope = this.ctx.settings.register(COMPACTION_SETTINGS_NAMESPACE, COMPACTION_SETTINGS_SCHEMA, {
+      // The schema admits each budget independently; refuse a section whose
+      // own budgets already conflict so the stored value stays actionable.
+      validate: (value) => {
+        const override = normalizeRuntimeOverride(value)
+        if (override.thresholdTokens !== undefined && override.retainTokens !== undefined
+          && override.retainTokens >= override.thresholdTokens) {
+          throw new Error(
+            `compaction settings: retainTokens (${override.retainTokens}) must be `
+            + `less than thresholdTokens (${override.thresholdTokens})`,
+          )
+        }
       },
-    )
+    })
+    runtimeOverride.current = normalizeRuntimeOverride(scope.get())
+    scope.watch(next => {
+      runtimeOverride.current = normalizeRuntimeOverride(next)
+    })
   }
 
   /** The latest user-owned override, normalized for policy overlay. */
@@ -423,8 +416,8 @@ export class BasicCompactionEngine extends CompactionEngine {
    * @returns the successful durable compaction result.
    */
   override async compactRegion(
-    start: number,
-    end: number,
+    start: SessionSeq,
+    end: SessionSeq,
     agent: Agent,
     signal?: AbortSignal,
   ): Promise<CompactionResult> {

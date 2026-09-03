@@ -21,17 +21,19 @@ export const BUILTIN_AI_KEYWORDS: readonly string[] = [
 /** Default X accounts followed through the syndication timeline endpoint. */
 export const DEFAULT_X_ACCOUNTS: readonly string[] = [
   'OpenAI', 'AnthropicAI', 'GoogleDeepMind', 'xai', 'karpathy', 'sama', 'DeepSeek_AI', 'MistralAI',
+  'NVIDIAAI', 'DemisHassabis', 'ylecun', 'AndrewYNg', 'GoogleAI', 'DeepMind', 'huggingface', 'stabilityai',
 ]
 
 const DEFAULT_INTERVAL_HOURS = 24
-const DEFAULT_MAX_ITEMS = 400
+const DEFAULT_MAX_ITEMS = 800
 const DEFAULT_CRAWL_TIMEOUT_MS = 300_000
 const DEFAULT_MAX_IMAGE_BYTES = 1_572_864
 const DEFAULT_MAX_AGE_DAYS = 7
+const DEFAULT_DOUYIN_AUTH_PROFILE_ID = 'douyin'
 const DEFAULT_TRANSLATE_API_KEY_ENV = 'DASHSCOPE_API_KEY'
 const DEFAULT_TRANSLATE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
 const DEFAULT_TRANSLATE_MODEL = 'qwen-turbo'
-const DEFAULT_TRANSLATE_MAX_PER_CRAWL = 80
+const DEFAULT_TRANSLATE_MAX_PER_CRAWL = 240
 
 /** The default store root: `$DSH_HOME` (or `~/.dsh`) plus `data/ai-news`. */
 export function defaultDataDir(): string {
@@ -86,6 +88,9 @@ export function resolveConfig(raw: unknown): ResolvedConfig {
     crawlTimeoutMs: Math.floor(asPositiveNumber(source.crawlTimeoutMs, DEFAULT_CRAWL_TIMEOUT_MS)),
     maxImageBytes: Math.floor(asPositiveNumber(source.maxImageBytes, DEFAULT_MAX_IMAGE_BYTES)),
     maxAgeDays: asPositiveNumber(source.maxAgeDays, DEFAULT_MAX_AGE_DAYS),
+    douyinAuthProfileId: typeof source.douyinAuthProfileId === 'string' && source.douyinAuthProfileId.trim() !== ''
+      ? source.douyinAuthProfileId.trim()
+      : DEFAULT_DOUYIN_AUTH_PROFILE_ID,
     translateEnabled: asBoolean(source.translateEnabled, true),
     translateApiKeyEnv: typeof source.translateApiKeyEnv === 'string' && source.translateApiKeyEnv.trim() !== ''
       ? source.translateApiKeyEnv.trim()

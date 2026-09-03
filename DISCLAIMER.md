@@ -11,7 +11,7 @@
    任何索赔、损害或其他责任承担责任。详见 [LICENSE](LICENSE)。
 
 3. **快速迭代的上游**。上游项目处于 developer preview 阶段，存在兼容性破坏性变更；本二改版基于
-   `0.1.2-alpha.1` 基线，可能滞后于上游修复，也可能引入自身缺陷。生产环境使用前请自行充分评估与测试。
+   `0.1.2-alpha.1` 基线、当前同步至 `dsh-v0.1.2-alpha.5`，可能滞后于上游修复，也可能引入自身缺陷。生产环境使用前请自行充分评估与测试。
 
 4. **实验性功能责任自负**。本仓库包含实验性增强（如「破甲 / jailbreak」红队模式、多智能体编排、自动化调度、
    内置终端等）。其中涉及模型安全测试的功能**仅限在获得明确授权的红队安全评估场景使用**；使用者须确保其行为
@@ -41,7 +41,7 @@
    claim, damages, or other liability arising from the use of the software. See [LICENSE](LICENSE).
 
 3. **Fast-moving upstream.** The upstream project is in developer preview with breaking changes; this fork is based
-   on the `0.1.2-alpha.1` baseline and may lag behind upstream fixes or carry its own defects. Evaluate and test
+   on the `0.1.2-alpha.1` baseline, currently synchronized through `dsh-v0.1.2-alpha.5`, and may lag behind upstream fixes or carry its own defects. Evaluate and test
    thoroughly before any production use.
 
 4. **Experimental features at your own risk.** This fork includes experimental enhancements (e.g., the jailbreak

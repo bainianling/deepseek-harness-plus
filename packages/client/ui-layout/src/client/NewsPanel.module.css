@@ -98,6 +98,45 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* Douyin login banner: an unobtrusive strip that appears until the built-in
+   browser has a persisted Douyin session. */
+.douyinLoginBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.douyinLoginText {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.douyinLoginButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.douyinLoginButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 /* Filter chip row: one chip per platform plus "all". Counts ride a muted
    pill; a failed crawl marks its chip with a dashed underline. */
 .filters {

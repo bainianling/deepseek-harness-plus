@@ -49,6 +49,13 @@ interface NewsFeed {
   items: NewsItem[]
 }
 
+/** Douyin login capability/status reported by `/api/ai-news/douyin/auth`. */
+interface DouyinAuth {
+  supported: boolean
+  profileConfigured: boolean
+  loggedIn: boolean
+}
+
 /** Chip/badge presentation per platform (labels come from the feed). */
 const PLATFORM_BADGE_CLASS: Record<NewsPlatform, string> = {
   bilibili: 'badgeBilibili',
@@ -186,6 +193,8 @@ export function NewsPanel({ t }: { t: AppFrameProps['t'] }) {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [refreshRequested, setRefreshRequested] = useState(false)
+  const [douyinAuth, setDouyinAuth] = useState<DouyinAuth | null>(null)
+  const [douyinPhase, setDouyinPhase] = useState<'idle' | 'scanning'>('idle')
   const feedRef = useRef<NewsFeed | null>(null)
   feedRef.current = feed
 
@@ -227,6 +236,41 @@ export function NewsPanel({ t }: { t: AppFrameProps['t'] }) {
       await fetch('/api/ai-news/refresh', { method: 'POST', cache: 'no-store' })
     } catch { /* the poller surfaces the failure */ }
     await load()
+  }, [load])
+
+  // The Douyin login affordance is optional: without the browser service or the
+  // configured auth profile the banner simply never appears.
+  useEffect(() => {
+    let cancelled = false
+    void fetch('/api/ai-news/douyin/auth', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+        return response.json() as Promise<DouyinAuth>
+      })
+      .then((auth) => { if (!cancelled) setDouyinAuth(auth) })
+      .catch(() => { /* login flow stays hidden */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const onDouyinLogin = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch('/api/ai-news/douyin/login', { method: 'POST', cache: 'no-store' })
+      if (!response.ok) return
+      // The host opened the login page; ask the browser panel to show it.
+      window.dispatchEvent(new CustomEvent('dsh-browser-panel:show', { cancelable: true }))
+      setDouyinPhase('scanning')
+    } catch { /* banner stays in the idle state */ }
+  }, [])
+
+  const onDouyinLoginComplete = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch('/api/ai-news/douyin/login/complete', { method: 'POST', cache: 'no-store' })
+      if (!response.ok) return
+      const body = await response.json() as { loggedIn: boolean }
+      setDouyinAuth(current => (current === null ? current : { ...current, loggedIn: body.loggedIn }))
+      setDouyinPhase('idle')
+      if (body.loggedIn) await load()
+    } catch { /* the poller keeps working */ }
   }, [load])
 
   const crawling = feed?.crawling === true || refreshRequested
@@ -306,6 +350,25 @@ export function NewsPanel({ t }: { t: AppFrameProps['t'] }) {
             )
           })}
         </div>
+
+        {douyinAuth !== null && douyinAuth.profileConfigured && !douyinAuth.loggedIn && (
+          <div className={css.douyinLoginBar} data-testid="news-douyin-login">
+            <p className={css.douyinLoginText}>
+              抖音热搜以娱乐内容为主，登录抖音后可直接抓取站内 AI 相关视频。
+            </p>
+            {douyinPhase === 'idle'
+              ? (
+                <button type="button" className={css.douyinLoginButton} onClick={() => { void onDouyinLogin() }}>
+                  登录抖音
+                </button>
+              )
+              : (
+                <button type="button" className={css.douyinLoginButton} onClick={() => { void onDouyinLoginComplete() }}>
+                  已在浏览器面板完成登录
+                </button>
+              )}
+          </div>
+        )}
 
         {error !== null && feed === null && (
           <div className={css.stateCard}>

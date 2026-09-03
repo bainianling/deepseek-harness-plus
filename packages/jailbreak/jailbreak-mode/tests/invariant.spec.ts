@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import * as JailbreakModeInvariant from '@deepseek-ai/dsh-jailbreak-mode/invariant'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 
@@ -13,7 +13,7 @@ async function setup(): Promise<Context> {
 }
 
 function event(active: unknown, strategy: unknown): SessionEvent {
-  return { type: 'jailbreak/mode', seq: 0, time: 0, data: { active, strategy } } as SessionEvent
+  return { type: 'jailbreak/mode', seq: SessionSeq(0), time: 0, data: { active, strategy } } as SessionEvent
 }
 
 describe('jailbreak-mode stream invariants', () => {
@@ -49,7 +49,7 @@ describe('jailbreak-mode stream invariants', () => {
     expect(() => {
       ctx.emit('tools/change')
       ctx.emit('session/event', session, {
-        type: 'turn/start', seq: 0, time: 0, data: { turn: 1 },
+        type: 'turn/start', seq: SessionSeq(0), time: 0, data: { turn: 1 },
       })
     }).not.toThrow()
   })

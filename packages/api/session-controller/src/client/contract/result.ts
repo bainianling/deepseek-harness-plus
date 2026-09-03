@@ -1,11 +1,10 @@
 /** Client operation results spanning the Session and subagent Remote calls. */
 
-import type { RpcError } from '@deepseek-ai/dsh-client-connection/client'
-import type { SubagentControlError } from '@deepseek-ai/dsh-subagent/client'
+import type { RemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionError } from '../../types.ts'
 
 /** Failure surfaced by the Client Session object layer. */
-export type ClientFailure = RpcError | SessionError | SubagentControlError
+export type ClientFailure = RemoteFailure | SessionError
 
 /** Success or failure returned by a Client Session operation. */
 export type ClientResult<T> =

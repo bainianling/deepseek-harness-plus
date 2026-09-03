@@ -14,7 +14,7 @@ import type { NewsStore } from './store.ts'
 import { Translator, type TranslationRuntime } from './translate.ts'
 import { NEWS_PLATFORMS, type NewsFeed, type NewsItem, type NewsPlatform, type PlatformStatus, type ResolvedConfig } from './types.ts'
 import { bilibiliCrawler } from './crawlers/bilibili.ts'
-import type { CrawlContext, PlatformCrawler } from './crawlers/context.ts'
+import type { CrawlContext, DouyinSearchHit, PlatformCrawler } from './crawlers/context.ts'
 import { douyinCrawler } from './crawlers/douyin.ts'
 import { rssCrawler } from './crawlers/rssfeeds.ts'
 import { twitterCrawler } from './crawlers/twitter.ts'
@@ -52,6 +52,7 @@ export class NewsCrawler {
     private readonly proxy: ProxyEndpoint | undefined,
     private readonly logger: NewsLogger,
     translationRuntime: TranslationRuntime = {},
+    private readonly douyinSearchProvider?: (keyword: string) => Promise<DouyinSearchHit[]>,
   ) {
     this.translator = new Translator(config, logger, translationRuntime)
   }
@@ -175,6 +176,7 @@ export class NewsCrawler {
   private makeContext(signal: AbortSignal): CrawlContext {
     const config = this.config
     const proxy = this.proxy
+    const provider = this.douyinSearchProvider
     return {
       config,
       proxy,
@@ -182,6 +184,7 @@ export class NewsCrawler {
       fetchSmart: (url: string, options: FetchOptions = {}): Promise<HttpResponse> =>
         smartFetch(url, proxy, { ...options, signal: options.signal ?? signal }),
       score: (title: string, body: string): number => aiScoreOf(title, body, config.keywords),
+      ...(provider === undefined ? {} : { douyinSearch: provider }),
     }
   }
 

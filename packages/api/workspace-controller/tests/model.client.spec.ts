@@ -18,11 +18,10 @@ import type {
   WorkspaceOrderValue,
   WorkspaceRenameRequest,
   WorkspaceValue,
-  WorkspaceError,
   WorkspaceId,
   WorkspaceView,
 } from '../src/types.ts'
-import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, type RemoteFailure, type RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 const sid = (id: string): SessionId => id as SessionId
@@ -47,7 +46,7 @@ function remoteOk<T>(value: T): RemoteResult<T> {
   return { ok: true, value }
 }
 
-function workspaceError(error: WorkspaceError): RemoteResult<never> {
+function workspaceError(error: RemoteFailure): RemoteResult<never> {
   return { ok: false, error }
 }
 
@@ -180,17 +179,17 @@ describe('ClientWorkspaceModel', () => {
     model.handleCarrierFailure()
     expect(model.getSnapshot()).toMatchObject({ phase: 'ready', state: 'loading', error: null })
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['visible'])
-    model.handleStreamFailure(new Error('wire down'))
+    model.handleStreamFailure(new RemoteError('gateway/internal', 'wire down', {}))
     expect(model.getSnapshot()).toMatchObject({
-      phase: 'ready', state: 'error', error: { code: 'internal', message: 'wire down' },
+      phase: 'ready', state: 'error', error: { code: 'gateway/internal', message: 'wire down' },
     })
-    model.handleStreamFailure('plain failure')
-    expect(model.getSnapshot().error?.message).toBe('plain failure')
+    // An unmarked value never crosses the stream boundary: it is a local fault.
+    expect(() => { model.handleStreamFailure('plain failure') }).toThrow()
     baseline(model, [workspace('restored')])
     expect(model.getSnapshot()).toMatchObject({ phase: 'ready', state: 'idle', error: null })
   })
 
-  it('creates by path, prepends the returned row, and folds rejected calls', async () => {
+  it('creates by path and prepends the returned row', async () => {
     const remote = new FakeWorkspaceRemote()
     const model = modelFor(remote)
     remote.onCreate = request => Promise.resolve(remoteOk({
@@ -200,11 +199,6 @@ describe('ClientWorkspaceModel', () => {
     await expect(model.create({ path: '/w/created' })).resolves.toMatchObject({ ok: true })
     expect(remote.calls).toContainEqual({ method: 'create', request: { path: '/w/created' } })
     expect(model.getSnapshot().items[0]?.workspaceId).toBe('created')
-
-    remote.onCreate = () => Promise.reject(new Error('create transport'))
-    await expect(model.create({ path: '/w/existing' })).resolves.toMatchObject({
-      ok: false, error: { code: 'internal', message: 'create transport' },
-    })
   })
 
   it('lets newer stream order outrank unary echoes and rolls failures back', async () => {
@@ -221,22 +215,16 @@ describe('ClientWorkspaceModel', () => {
     await pending
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['one', 'three', 'two'])
 
-    remote.onInsertBefore = () => Promise.resolve(workspaceError({
-      code: 'workspace-not-found', message: 'gone', details: { workspaceId: wid('three') },
-    }))
+    remote.onInsertBefore = () => Promise.resolve(workspaceError(
+      new RemoteError('workspace/not-found', 'gone', { workspaceId: wid('three') }),
+    ))
     const rejected = model.insertBefore(wid('three'))
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['one', 'two', 'three'])
     await expect(rejected).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['one', 'three', 'two'])
-
-    remote.onInsertBefore = () => Promise.reject(new Error('transport down'))
-    const disconnected = model.insertBefore(wid('three'), wid('one'))
-    expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['three', 'one', 'two'])
-    await expect(disconnected).rejects.toThrow('transport down')
-    expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['one', 'three', 'two'])
   })
 
-  it('keeps a newer optimistic reorder when an older transport call rejects', async () => {
+  it('keeps a newer optimistic reorder when an older refused call settles', async () => {
     const remote = new FakeWorkspaceRemote()
     const model = modelFor(remote)
     baseline(model, [workspace('one'), workspace('two'), workspace('three')])
@@ -247,8 +235,10 @@ describe('ClientWorkspaceModel', () => {
 
     const first = model.insertBefore(wid('three'), wid('one'))
     const second = model.insertBefore(wid('two'), wid('three'))
-    firstGate.reject(new Error('first transport failed'))
-    await expect(first).rejects.toThrow('first transport failed')
+    firstGate.resolve(workspaceError(
+      new RemoteError('workspace/not-found', 'first refused', { workspaceId: wid('three') }),
+    ))
+    await expect(first).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['two', 'three', 'one'])
     secondGate.resolve(remoteOk({ workspaceIds: [wid('two'), wid('three'), wid('one')] }))
     await expect(second).resolves.toMatchObject({ ok: true })
@@ -266,14 +256,10 @@ describe('ClientWorkspaceModel', () => {
     const first = model.insertBefore(wid('three'), wid('one'))
     const second = model.insertBefore(wid('two'), wid('three'))
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['two', 'three', 'one'])
-    firstGate.resolve(workspaceError({
-      code: 'workspace-not-found', message: 'first rejected', details: { workspaceId: wid('three') },
-    }))
+    firstGate.resolve(workspaceError(new RemoteError('workspace/not-found', 'first rejected', { workspaceId: wid('three') })))
     await expect(first).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['two', 'three', 'one'])
-    secondGate.resolve(workspaceError({
-      code: 'workspace-not-found', message: 'second rejected', details: { workspaceId: wid('two') },
-    }))
+    secondGate.resolve(workspaceError(new RemoteError('workspace/not-found', 'second rejected', { workspaceId: wid('two') })))
     await expect(second).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items.map(item => item.workspaceId)).toEqual(['one', 'two', 'three'])
   })
@@ -306,15 +292,11 @@ describe('ClientWorkspaceModel', () => {
     const model = modelFor(remote)
     baseline(model, [workspace('one', [sid('first'), sid('second')])], [sid('archived')])
 
-    remote.onRename = () => Promise.resolve(workspaceError({
-      code: 'workspace-not-found', message: 'gone', details: { workspaceId: wid('one') },
-    }))
+    remote.onRename = () => Promise.resolve(workspaceError(new RemoteError('workspace/not-found', 'gone', { workspaceId: wid('one') })))
     await expect(model.rename(wid('one'), 'ignored')).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items[0]?.title).toBe('one')
 
-    remote.onDelete = () => Promise.resolve(workspaceError({
-      code: 'workspace-not-found', message: 'gone', details: { workspaceId: wid('one') },
-    }))
+    remote.onDelete = () => Promise.resolve(workspaceError(new RemoteError('workspace/not-found', 'gone', { workspaceId: wid('one') })))
     await expect(model.delete(wid('one'))).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().items).toHaveLength(1)
 
@@ -328,11 +310,9 @@ describe('ClientWorkspaceModel', () => {
       request: { workspaceId: 'one', sessionId: 'second', beforeSessionId: 'first' },
     })
 
-    remote.onInsertSessionBefore = () => Promise.resolve(workspaceError({
-      code: 'workspace-move-invalid',
-      message: 'invalid move',
-      details: { workspaceId: wid('one'), sessionId: sid('second') },
-    }))
+    remote.onInsertSessionBefore = () => Promise.resolve(workspaceError(
+      new RemoteError('workspace/move-invalid', 'invalid move', { workspaceId: wid('one'), sessionId: sid('second') }),
+    ))
     await expect(model.insertSessionBefore(wid('one'), sid('second')))
       .resolves.toMatchObject({ ok: false })
     expect(remote.calls).toContainEqual({
@@ -340,9 +320,9 @@ describe('ClientWorkspaceModel', () => {
       request: { workspaceId: 'one', sessionId: 'second' },
     })
 
-    remote.onArchiveSession = () => Promise.resolve(workspaceError({
-      code: 'session-not-found', message: 'missing', details: { sessionId: sid('missing') },
-    }))
+    remote.onArchiveSession = () => Promise.resolve(workspaceError(
+      new RemoteError('session/not-found', 'missing', { sessionId: sid('missing') }),
+    ))
     await expect(model.archiveSession(sid('missing'))).resolves.toMatchObject({ ok: false })
     expect(model.getSnapshot().archivedSessionIds).toEqual(['archived'])
     remote.onArchiveSession = request => Promise.resolve(remoteOk({ archivedSessionIds: [request.sessionId] }))
@@ -424,11 +404,11 @@ describe('ClientWorkspaceModel', () => {
       request: { workspaceId: 'target', sessionId: 'moving', beforeSessionId: 'anchor' },
     })
 
-    remote.onMoveSession = () => Promise.resolve(workspaceError({
-      code: 'workspace-move-invalid',
-      message: 'anchor is not accounted',
-      details: { workspaceId: wid('target'), sessionId: sid('moving') },
-    }))
+    remote.onMoveSession = () => Promise.resolve(workspaceError(new RemoteError(
+      'workspace/move-invalid',
+      'anchor is not accounted',
+      { workspaceId: wid('target'), sessionId: sid('moving') },
+    )))
     await expect(model.moveSession(wid('target'), sid('moving'), sid('missing')))
       .resolves.toMatchObject({ ok: false })
   })
@@ -445,9 +425,9 @@ describe('ClientWorkspaceModel', () => {
     expect(model.getSnapshot().items[0]?.sessionIds).toEqual(['gone'])
     expect(model.getSnapshot().archivedSessionIds).toEqual(['gone'])
 
-    remote.onDeleteSession = () => Promise.resolve(workspaceError({
-      code: 'session-live', message: 'still open', details: { sessionId: sid('gone') },
-    }))
+    remote.onDeleteSession = () => Promise.resolve(workspaceError(new RemoteError(
+      'session-live', 'still open', { sessionId: sid('gone') },
+    )))
     await expect(model.deleteSession(sid('gone'))).resolves.toMatchObject({
       ok: false, error: { code: 'session-live' },
     })

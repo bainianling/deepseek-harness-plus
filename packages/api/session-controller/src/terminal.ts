@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TerminalError, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
 import type { TerminalSessionSnapshot } from '@deepseek-ai/dsh-terminal'
-import { TypertRemoteFailure } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { ApiSessionAgentController } from './agent.ts'
 import type {
   SessionTerminalCloseRequest,
@@ -132,7 +132,7 @@ export class SessionTerminalController {
 
   private async owner(sessionId: SessionTerminalListRequest['sessionId']): Promise<Agent> {
     const found = await this.agents.resolveAgent(sessionId)
-    if ('error' in found) throw new TypertRemoteFailure(found.error)
+    if ('error' in found) throw new RemoteError(found.error.code, found.error.message, found.error.details)
     return found.agent
   }
 
@@ -163,19 +163,19 @@ function publicSnapshot(snapshot: TerminalSessionSnapshot): SessionTerminalSnaps
   }
 }
 
-function terminalFailure(operation: string, error: unknown): TypertRemoteFailure {
-  if (error instanceof TypertRemoteFailure) return error
+function terminalFailure(operation: string, error: unknown): RemoteError<'bad-request' | 'internal'> {
+  if (error instanceof RemoteError) return error
   const code = error instanceof TerminalError
     && (error.code === 'NO_SESSION' || error.code === 'FOREIGN_SESSION' || error.code === 'SEND_ACTIVE')
     ? 'bad-request'
     : 'internal'
-  return new TypertRemoteFailure({
+  return new RemoteError(
     code,
-    message: `failed to ${operation} terminal: ${error instanceof Error ? error.message : String(error)}`,
-    details: error instanceof TerminalError ? { reason: error.code } : {},
-  })
+    `failed to ${operation} terminal: ${error instanceof Error ? error.message : String(error)}`,
+    {},
+  )
 }
 
 function reject(code: 'bad-request', message: string): never {
-  throw new TypertRemoteFailure({ code, message, details: {} })
+  throw new RemoteError(code, message, {})
 }

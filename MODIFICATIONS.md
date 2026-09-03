@@ -12,13 +12,16 @@ English note at the [end](#english-note).
 | 基线提交 | `cd5ef8148158c3a752a658978873241fdf8e2bbc` |
 | 对应版本 | `0.1.2-alpha.1`（release 分支 `release/dsh-0.1.2-alpha.1` 的合并提交，PR #3248） |
 | 原版许可证 | MIT License，Copyright (c) 2026 DeepSeek |
+| 当前同步源码 | `dsh-v0.1.2-alpha.5`，来源工作树提交 `3b479baa1cec71898a95684a3daa21f40934ac7f` |
 
-本仓库的提交历史为两段式：第 1 个提交是上游基线的原样导入（squashed import），第 2 个提交是全部本地修改。
-在本仓库中查看「第二个提交的 diff」即可看到相对原版的完整改动。
+本仓库当前采用三段式发布历史：第 1 个提交是上游基线的原样导入（squashed import），第 2 个提交是首次二改完整体，第 3 个提交同步上游至 `dsh-v0.1.2-alpha.5` 并加入本次本地增强。
+查看第 2、3 个提交的 diff，可以分别看到初始二改和后续增量改动。
 
 ## 总体规模
 
-相对上游基线：**389 个文件变更，+36,620 行 / −870 行；其中新增文件 173 个，修改文件 216 个。**
+初始二改相对 alpha.1 基线：**389 个文件变更，+36,620 行 / −870 行；其中新增文件 173 个，修改文件 216 个。**
+
+本次增量包含完整的上游 alpha.2–alpha.5 同步，以及模型测试台与本地化增强；上游同步会带来包重组、接口/测试夹具和双语文档变化，精确数量以本次发布提交的 Git diff 为准。
 
 ## 一、新增功能（按模块）
 
@@ -51,6 +54,9 @@ English note at the [end](#english-note).
 
 - host 侧插件包 `packages/web/model-bench`：同一提示词并发投喂多个模型路由，收集输出、时延、用量并持久化（store）。
 - 客户端分区 `ModelBenchApp.tsx`（+样式）；配套测试与 `cordis.patch.yml`。
+- 本次增量强化题目合同：固定编程 / 文档 / 识图 / 论文四类题目；生成器必须按 `easy` / `medium` / `hard` 生成对应工作量、材料和参考答案；裁判使用难度对应的通过阈值与严格度。
+- 引擎按难度缩放生成、作答、裁判超时预算（`easy=1x`、`medium=1.5x`、`hard=2.5x`），共享停止信号，并对阶段超时抛出可识别错误。
+- 题目元数据解析具备防御性回退；裁判结果使用 `[BENCH_VERDICT]` 标记解析，支持中英文通过值、`/10` 后缀、最后一条标记优先和 0–10 分数钳制；新增中英文界面文案及覆盖这些合同的定向测试。
 
 ### 5. LoRA 训练工作室
 
@@ -71,7 +77,7 @@ English note at the [end](#english-note).
   可用浏览器 localStorage `dsh.voiceServiceUrl` 覆盖）的 TTS 工作台，暴露推理参数（top_p/top_k/temperature/
   repetition_penalty/max_mel_tokens 等），含参考音频管理与合成试听。
 - `VoiceAssistant.tsx`：语音助手入口组件。
-- 语音服务本体不在本仓库内，需自行部署。
+- 语音服务本体不在本仓库内，需自行部署；公开版本已将启动提示中的本机绝对路径改为通用的 `voice-clone\\start-voice-service.cmd`。
 
 ### 8. 内置浏览器面板
 
@@ -169,7 +175,10 @@ English note at the [end](#english-note).
 This repository modifies the upstream project at baseline commit
 `cd5ef8148158c3a752a658978873241fdf8e2bbc` (release `0.1.2-alpha.1`, MIT License).
 The second commit in this repository contains the complete local modification set:
-389 files changed, +36,620 / −870 lines (173 files added, 216 modified).
+The initial modification commit changed 389 files, +36,620 / −870 lines (173 files added, 216 modified).
+The current release also includes the upstream alpha.2–alpha.5 synchronization and a local model-bench increment:
+strict four-category difficulty contracts, `easy`/`medium`/`hard` prompt rules, difficulty-scaled phase timeouts,
+defensive metadata/verdict parsing, and matching English/Chinese UI copy with focused tests.
 
 The modifications add, among other things: an AI news aggregation section, a read-only skill marketplace,
 a Hindsight-backed knowledge center, a multi-model benchmark bench, a LoRA training studio wrapping a local

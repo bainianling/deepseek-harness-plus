@@ -459,6 +459,62 @@ describe('AppFrame — nav rail sections', () => {
     }
   })
 
+  it('offers the douyin login banner until the browser session is logged in', async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/api/ai-news/douyin/auth')) {
+        return { ok: true, json: async () => ({ supported: true, profileConfigured: true, loggedIn: false }) }
+      }
+      if (url.includes('/api/ai-news/douyin/login/complete') && method === 'POST') {
+        return { ok: true, json: async () => ({ loggedIn: true }) }
+      }
+      if (url.includes('/api/ai-news/douyin/login') && method === 'POST') {
+        return { ok: true, json: async () => ({ ok: true, url: 'https://www.douyin.com/' }) }
+      }
+      return {
+        ok: true,
+        json: async () => ({ updatedAt: 1, crawling: false, platforms: [], items: [] }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    let showEvents = 0
+    const onShow = (event: Event): void => {
+      event.preventDefault()
+      showEvents += 1
+    }
+    window.addEventListener('dsh-browser-panel:show', onShow)
+    try {
+      const { frame } = mountFrame()
+      await act(async () => {
+        clickNav(frame, 'news')
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const banner = frame.querySelector('[data-testid="news-douyin-login"]')
+      expect(banner).not.toBeNull()
+      const loginButton = banner!.querySelector('button')
+      expect(loginButton!.textContent).toContain('登录抖音')
+      await act(async () => {
+        loginButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(showEvents).toBe(1)
+      const doneButton = frame.querySelector('[data-testid="news-douyin-login"] button')
+      expect(doneButton!.textContent).toContain('已在浏览器面板完成登录')
+      await act(async () => {
+        doneButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(frame.querySelector('[data-testid="news-douyin-login"]')).toBeNull()
+    } finally {
+      window.removeEventListener('dsh-browser-panel:show', onShow)
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('the collab section renders the collaboration studio instead of the placeholder', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = String(input)

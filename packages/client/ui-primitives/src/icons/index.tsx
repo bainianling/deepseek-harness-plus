@@ -771,6 +771,23 @@ export const IconDataOutline16 = ({ size = 16, className }: IconProps) => (
   </svg>
 )
 
+/** IconDataOutline16 without its gear: a three-tier database cylinder. */
+export const IconDatabaseOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="8" cy="3.6" rx="5.75" ry="2.4" stroke="currentColor" strokeWidth="1.25" />
+    <path d="M2.25 3.6V12.3A5.75 2.4 0 0 0 13.75 12.3V3.6" stroke="currentColor" strokeWidth="1.25" />
+    <path d="M2.25 7.95A5.75 2.4 0 0 0 13.75 7.95" stroke="currentColor" strokeWidth="1.25" />
+  </svg>
+)
+
+/** Thin-stroke clock: outlined dial with square-cut hour and minute hands. */
+export const IconClockOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="8" cy="8" r="6.375" stroke="currentColor" strokeWidth="1.25" />
+    <path d="M8 4.4V8.3L10.7 9.85" stroke="currentColor" strokeWidth="1.25" />
+  </svg>
+)
+
 /** ic_send_outline_14 (figma extract): thin-stroke upward send arrow. */
 export const IconSendOutline14 = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -879,6 +896,26 @@ export const IconQuestionOutline14 = ({ size = 14, className }: IconProps) => (
       fill="currentColor"
     />
     <path d="M7.39455 9.44026V10.8109H6.16921V9.44026H7.39455Z" fill="currentColor" />
+  </svg>
+)
+
+/** Alarm clock outline for active scheduled-task indicators. */
+export const IconAlarmClockOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg
+    aria-hidden="true"
+    width={size}
+    height={size}
+    className={className}
+    viewBox="0 0 16 16"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path d="M3.5 2.5 1.75 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    <path d="M12.5 2.5 14.25 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    <circle cx="8" cy="8.5" r="4.75" stroke="currentColor" strokeWidth="1.25" />
+    <path d="M8 5.75V8.5L10 9.75" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="m4.75 12.25-1 1.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    <path d="m11.25 12.25 1 1.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
   </svg>
 )
 
@@ -1002,23 +1039,5 @@ export const IconStoreOutline16 = ({ size = 16, className }: IconProps) => (
     <path d="M2 6.2L3.35 2.7H12.65L14 6.2H2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
     <path d="M5.1 2.9L4.55 6.1M8 2.9V6.1M10.9 2.9L11.45 6.1" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
     <path d="M4.4 9H7.2V11.2H4.4V9ZM9.4 9H11.6V13.2H9.4V9Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
-  </svg>
-)
-
-/** ic_ds_clock_outline_16 (harness-only): clock face with hands for automation/schedule UI. */
-export const IconClockOutline16 = ({ size = 16, className }: IconProps) => (
-  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path
-      fillRule="evenodd"
-      clipRule="evenodd"
-      d="M8.00003 1.33333C4.31813 1.33333 1.33336 4.3181 1.33336 8C1.33336 11.6819 4.31813 14.6667 8.00003 14.6667C11.6819 14.6667 14.6667 11.6819 14.6667 8C14.6667 4.3181 11.6819 1.33333 8.00003 1.33333ZM0.0000305176 8C0.0000305176 3.58172 3.58175 0 8.00003 0C12.4183 0 16 3.58172 16 8C16 12.4183 12.4183 16 8.00003 16C3.58175 16 0.0000305176 12.4183 0.0000305176 8Z"
-      fill="currentColor"
-    />
-    <path
-      fillRule="evenodd"
-      clipRule="evenodd"
-      d="M8.00003 3.33333C8.36822 3.33333 8.6667 3.63181 8.6667 4V7.72386L10.8619 9.91905C11.1223 10.1794 11.1223 10.6015 10.8619 10.8619C10.6016 11.1222 10.1795 11.1222 9.91912 10.8619L7.52858 8.47134C7.40356 8.34632 7.33336 8.17674 7.33336 8V4C7.33336 3.63181 7.63184 3.33333 8.00003 3.33333Z"
-      fill="currentColor"
-    />
   </svg>
 )

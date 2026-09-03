@@ -84,6 +84,8 @@ export interface ResolvedConfig {
   maxImageBytes: number
   /** Items older than this many days are not admitted. */
   maxAgeDays: number
+  /** dsh-browser authProfile id holding the Douyin login state. */
+  douyinAuthProfileId: string
   /** Auto-translate English titles/summaries into Chinese. */
   translateEnabled: boolean
   /** Environment variable holding the translation API key. */

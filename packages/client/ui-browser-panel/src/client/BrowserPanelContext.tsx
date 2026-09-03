@@ -36,6 +36,9 @@ export interface BrowserPanelBridge {
 /** DOM event any GUI surface dispatches to open a URL in the built-in browser. */
 export const OPEN_URL_EVENT = 'dsh-browser-panel:open'
 
+/** DOM event asking the panel to become visible without navigating anywhere. */
+export const SHOW_PANEL_EVENT = 'dsh-browser-panel:show'
+
 /** Payload carried by {@link OPEN_URL_EVENT}. */
 export interface OpenUrlEventDetail {
   /** Absolute http(s) URL to open. */
@@ -293,6 +296,19 @@ export function BrowserPanelProvider({ children, bridge }: BrowserPanelProviderP
     window.addEventListener(OPEN_URL_EVENT, onOpen)
     return () => { window.removeEventListener(OPEN_URL_EVENT, onOpen) }
   }, [bridge, openUrl])
+
+  // Show-only entry point: surfaces that drive the browser through host routes
+  // (e.g. the news panel's Douyin login) ask the panel to become visible
+  // without replacing the page the host already opened.
+  useEffect(() => {
+    if (bridge === undefined) return
+    const onShow = (event: Event): void => {
+      event.preventDefault()
+      openPanel()
+    }
+    window.addEventListener(SHOW_PANEL_EVENT, onShow)
+    return () => { window.removeEventListener(SHOW_PANEL_EVENT, onShow) }
+  }, [bridge, openPanel])
 
   // Boot sync + steady-state poll. The poll only lists the directory; images
   // transfer for brand-new files within a small per-cycle budget.

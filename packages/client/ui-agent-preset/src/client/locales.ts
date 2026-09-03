@@ -1,4 +1,4 @@
-/** Locale bundles for the agent-preset settings row, hero chip, header label, and management section. */
+/** Locale bundles for the agent-preset hero chip, header label, and management section. */
 
 /** Locale keys these surfaces render. */
 export type AgentPresetSettingsKey =
@@ -44,7 +44,7 @@ export const en: Record<AgentPresetSettingsKey, string> = {
     'Full coding agent with file editing, shell, file and web search, skills, planning, goals, subagents, and workflows.',
   presetPtcName: 'PTC mode',
   presetPtcDescription:
-    'All Standard mode capabilities, with tools exposed through the PTC mode SDK so the model can combine multi-step operations in one TypeScript program.',
+    'Full coding agent without the workflow tool; other tools are exposed through the PTC mode SDK so the model can combine multi-step operations in one TypeScript program.',
   presetMinimalName: 'Minimal mode',
   presetMinimalDescription:
     'Two-tool coding agent with persistent bash and str_replace_editor.',
@@ -109,7 +109,7 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   presetStandardName: '标准模式',
   presetStandardDescription: '功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。',
   presetPtcName: 'PTC 模式',
-  presetPtcDescription: '具备标准模式的全部能力，并通过 PTC 模式 SDK 呈现工具，让模型用一个 TypeScript 程序组合多步操作。',
+  presetPtcDescription: '功能完整的编码 Agent，但默认不提供 workflow 工具；其他工具通过 PTC 模式 SDK 呈现，让模型用一个 TypeScript 程序组合多步操作。',
   presetMinimalName: '极简模式',
   presetMinimalDescription: '仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。',
   presetCordisName: '创造模式',
@@ -150,52 +150,8 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   deleting: '正在删除…',
 }
 
-/** Preset roster fields needed to resolve Web display copy. */
-export interface PresetDisplaySource {
-  /** Stable preset id. */
-  readonly id: string
-  /** Whether the deployment ships the preset or the user owns it. */
-  readonly trust: 'system' | 'user'
-  /** Unlocalized name published by the preset. */
-  readonly name?: string
-  /** Unlocalized description published by the preset. */
-  readonly description?: string
-}
-
-/** Display copy resolved for the active Web locale. */
-export interface PresetDisplayText {
-  /** Localized built-in name or the preset's own fallback name. */
-  readonly name: string
-  /** Localized built-in description or the preset's own description. */
-  readonly description?: string
-}
-
-interface PresetLocaleKeys {
-  readonly name: AgentPresetSettingsKey
-  readonly description: AgentPresetSettingsKey
-}
-
-const BUILT_IN_PRESET_KEYS: Readonly<Partial<Record<string, PresetLocaleKeys>>> = {
-  standard: { name: 'presetStandardName', description: 'presetStandardDescription' },
-  ptc: { name: 'presetPtcName', description: 'presetPtcDescription' },
-  minimal: { name: 'presetMinimalName', description: 'presetMinimalDescription' },
-  cordis: { name: 'presetCordisName', description: 'presetCordisDescription' },
-}
-
-/**
- * Resolve preset display copy without making user-authored metadata translatable.
- * @param preset - roster row whose copy is being rendered.
- * @param t - active Web locale lookup.
- * @returns localized copy for a known shipped preset, otherwise file metadata.
- */
-export function presetDisplayText(
-  preset: PresetDisplaySource,
-  t: (key: AgentPresetSettingsKey) => string,
-): PresetDisplayText {
-  const keys = preset.trust === 'system' ? BUILT_IN_PRESET_KEYS[preset.id] : undefined
-  if (keys !== undefined) return { name: t(keys.name), description: t(keys.description) }
-  return {
-    name: preset.name ?? preset.id,
-    ...preset.description === undefined ? {} : { description: preset.description },
-  }
-}
+// The resolution itself is the shared fold in `dsh-agent-presets/display`,
+// re-exported here so every surface in this plugin reads one path; the
+// Settings plugin list inlines the same fold over this plugin's dictionaries.
+export { presetDisplayText } from '@deepseek-ai/dsh-agent-presets/display'
+export type { PresetDisplaySource, PresetDisplayText } from '@deepseek-ai/dsh-agent-presets/display'

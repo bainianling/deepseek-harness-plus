@@ -7,9 +7,10 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { ChunkRow } from '@deepseek-ai/dsh-session/chunk-rows'
-import type { JsonValue, SessionHeader, SessionId, SurfaceOp } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { JobId } from '@deepseek-ai/dsh-jobs/brand'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -204,31 +205,6 @@ export interface SessionErrorDetailsMap {
   'session-conflict': {
     readonly sessionId: SessionId
     readonly requestedCwd: string
-    readonly existingCwd?: string
-  }
-  'invalid-time-zone': { readonly value: string }
-  'workspace-attach-failed': { readonly sessionId: SessionId; readonly workspaceId: string }
-  'workspace-not-found': { readonly workspaceId: string }
-  'agent-preset-conflict': {
-    readonly sessionId: SessionId
-    readonly requestedPreset: string
-    readonly existingPreset?: string
-  }
-  'agent-preset-not-found': { readonly agentPreset: string; readonly available: readonly string[] }
-  'agent-preset-invalid': { readonly agentPreset: string; readonly reason: string }
-  'agent-busy': { readonly reason: string }
-  'attachment-error': { readonly reason: string }
-  'queue-item-not-found': { readonly itemId: MessageId }
-  'steer-unavailable': { readonly itemId: MessageId }
-  'title-invalid': { readonly sessionId: SessionId }
-  'fork-unavailable': { readonly sessionId: SessionId }
-  'subagent-not-found': {
-    readonly parentSessionId: SessionId
-    readonly childSessionId: SessionId
-  }
-  'subagent-catalog-diagnostic': {
-    readonly parentSessionId: SessionId
-    readonly childSessionId: SessionId
     readonly reason: 'corrupt' | 'unsupported' | 'unavailable'
   }
   'subagent-unauthorized': { readonly childSessionId: SessionId }
@@ -243,6 +219,41 @@ export type SessionError = {
     readonly details: SessionErrorDetailsMap[Code]
   }
 }[keyof SessionErrorDetailsMap]
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    'session/model-unavailable': { readonly provider: string; readonly model: string }
+    'session/conflict': {
+      readonly sessionId: SessionId
+      readonly requestedCwd: string
+      readonly existingCwd?: string
+    }
+    'session/agent-busy': { readonly reason: string }
+    'session/invalid-time-zone': { readonly value: string }
+    'session/workspace-attach-failed': { readonly sessionId: SessionId; readonly workspaceId: string }
+    'agent-preset/conflict': {
+      readonly sessionId: SessionId
+      readonly requestedPreset: string
+      readonly existingPreset?: string
+    }
+    'session/attachment-invalid': { readonly reason: string }
+    'session/queue-item-not-found': { readonly itemId: MessageId }
+    'session/steer-unavailable': { readonly itemId: MessageId }
+    'session/title-invalid': { readonly sessionId: SessionId }
+    'session/fork-unavailable': { readonly sessionId: SessionId }
+    'subagent/not-found': {
+      readonly parentSessionId: SessionId
+      readonly childSessionId: SessionId
+    }
+    'subagent/catalog-diagnostic': {
+      readonly parentSessionId: SessionId
+      readonly childSessionId: SessionId
+      readonly reason: 'corrupt' | 'unsupported' | 'unavailable'
+    }
+    'bad-request': Record<never, never>
+    'internal': Record<never, never>
+  }
+}
 
 /** Session-addressed request for the human-invocable skill catalog. */
 export interface SkillListRequest {
@@ -516,6 +527,25 @@ export interface SessionEventEntry {
   readonly event: SessionWireEvent
 }
 
+/** v0-compatible Session metadata carried on the browser wire. */
+export interface SessionWireHeader {
+  readonly version: number
+  readonly id: SessionId
+  readonly createdAt: number
+  readonly cwd?: string
+  readonly parentSession?: SessionId
+  /** Exact inherited prefix length; absent for an unseeded Session. */
+  readonly seedLength?: number
+  readonly origin?: 'subagent'
+  readonly delegationDepth?: number
+  readonly agentPreset?: string
+}
+
+/** Browser wire form of one Session surface operation. */
+export type SessionWireSurfaceOp =
+  | 'append'
+  | { readonly op: 'replace'; readonly start: number; readonly end: number }
+
 /** Event-shaped wire representation of one packed chunk row. */
 export type ChunkRowEvent = {
   [Kind in ChunkRow['type']]: {
@@ -541,8 +571,9 @@ export interface SessionWireEvent {
   readonly seq: number
   readonly time: number
   readonly data: JsonValue
+  readonly ignorable?: true
   readonly sourceEventSeqs?: number[]
-  readonly surfaceOp?: SurfaceOp
+  readonly surfaceOp?: SessionWireSurfaceOp
 }
 
 /** One message-aligned backwards-history request. */
@@ -570,7 +601,7 @@ export interface SessionPage {
 export type SessionFollowFrame =
   | {
     readonly type: 'snapshot'
-    readonly header: SessionHeader
+    readonly header: SessionWireHeader
     readonly cursor: number
     readonly records: readonly SessionHistoryRecord[]
     readonly hasMore: boolean

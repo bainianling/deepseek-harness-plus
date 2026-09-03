@@ -6,6 +6,13 @@
 import type { FetchOptions, HttpResponse, ProxyEndpoint } from '../http.ts'
 import type { NewsItem, ResolvedConfig } from '../types.ts'
 
+/** One login-based Douyin search hit (rendered by the built-in browser). */
+export interface DouyinSearchHit {
+  url: string
+  title: string
+  snippet?: string
+}
+
 /** Capabilities and limits one crawler receives. */
 export interface CrawlContext {
   config: ResolvedConfig
@@ -16,6 +23,8 @@ export interface CrawlContext {
   fetchSmart(url: string, options?: FetchOptions): Promise<HttpResponse>
   /** Extra AI keywords for relevance scoring. */
   score(title: string, body: string): number
+  /** Login-based Douyin keyword search; absent without a browser session. */
+  douyinSearch?: (keyword: string) => Promise<DouyinSearchHit[]>
 }
 
 /** One platform adapter. */
