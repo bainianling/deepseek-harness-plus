@@ -1,0 +1,120 @@
+.root {
+  position: relative;
+  min-width: 0;
+}
+
+.rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Edge arrows page the overflow; the scrollbar stays hidden (both engines). */
+  scrollbar-width: none;
+  /* The rail scrolls on the composer's elevated input surface: bind the l2
+     pair (ui-theme styles/scrollbar.css rebinding contract) so anything that
+     does draw a thumb here matches the surface. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 132px) 24px;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 min(240px, 72%);
+  min-width: 0;
+  height: 48px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.thumbnail {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 16px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  cursor: zoom-in;
+}
+
+.thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.name {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.remove {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.remove:hover,
+.remove:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  color: var(--dsw-alias-label-primary);
+}
+
+.arrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 999px;
+  background: var(--dsw-specific-input-major);
+  color: var(--dsw-alias-label-secondary);
+  box-shadow: var(--dsw-shadow-lv2);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.arrow:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.arrowLeft {
+  left: 4px;
+}
+
+.arrowRight {
+  right: 4px;
+}

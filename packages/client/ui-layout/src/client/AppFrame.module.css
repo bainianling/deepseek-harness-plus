@@ -1,0 +1,236 @@
+.frame {
+  display: grid;
+  grid-template-rows: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+}
+
+/* The work shell owns the animated three-column tracks (sidebar | center |
+   details) inside the frame's second track, right of the nav rail. It also
+   anchors the drag handles, which straddle column borders. Collapse/expand
+   animates the tracks on the deepsuite sider curve (--ds-ease-in-out /
+   --ds-transition-duration-slow, ui-theme base.css). */
+.workShell {
+  position: relative;
+  display: grid;
+  grid-template-rows: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+  will-change: grid-template-columns;
+}
+
+/* A non-work nav section hides the shell without unmounting it: the session
+   slots keep streaming and switching back to work is instant. */
+.workShell[data-nav-hidden] {
+  display: none;
+}
+
+/* Dragging writes widths at pointer cadence; easing them would detach the
+   column from the handle. */
+.frame[data-dragging] .workShell {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workShell {
+    transition: none;
+  }
+}
+
+/* App-level nav rail: the frame's first track. One icon+label button per
+   section; the active section reads as a filled chip on the shared
+   sidebar-nav-item tokens (design-platform.css). */
+.navRail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 14px 0 16px;
+  background: var(--dsw-alias-bg-module-platform);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+}
+
+.navItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 60px;
+  padding: 8px 4px 7px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.navItem:hover {
+  background: var(--dsw-specific-sidebar-nav-item-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.navItem[data-active] {
+  background: var(--dsw-specific-sidebar-nav-item-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.navItem[data-active] .navIcon {
+  color: var(--dsw-alias-label-primary-bluish);
+}
+
+.navIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navLabel {
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.sidebarCol {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--dsw-specific-sidebar-fill);
+  border-right: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.centerCol {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detailsCol {
+  min-width: 0;
+  overflow: hidden;
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+/* The details subtree stays mounted at zero width, so its border must not paint
+   a 1px seam. The collapsed sidebar instead retains a bordered compact rail. */
+.frame[data-details-collapsed] .detailsCol {
+  border-left: none;
+}
+
+.frame[data-shared-mobile-layout] .sidebarCol {
+  display: none;
+}
+
+/* Drag handles are frame children (columns clip overflow): an 8px hit strip
+   centered on the column border via inline left, above column content. Details
+   adds a visible 12x32 pill at vertical center; sidebar keeps only the hit strip. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+  /* Rides the same curve as the tracks so the pill stays on the moving
+     border during collapse/expand; paused while dragging (frame rule). */
+  transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+.frame[data-dragging] .handle {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handle {
+    transition: none;
+  }
+}
+
+.handle[data-side='details']::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 32px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  background: var(--dsw-alias-button-floating-fill);
+  border: 0.5px solid var(--dsw-alias-border-l2-darkmode-thin);
+  /* Hover affordance: the details pill hides until the pointer is over its
+     column, the strip itself, or a drag. */
+  opacity: 0;
+  transition:
+    opacity var(--ds-transition-duration-slow) var(--ds-ease-in-out),
+    background var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+.detailsCol:hover ~ .handle[data-side='details']::after,
+.handle[data-side='details']:hover::after,
+.handle[data-side='details'][data-dragging='true']::after {
+  opacity: 1;
+}
+
+.handle[data-side='details']:hover::after,
+.handle[data-side='details'][data-dragging='true']::after {
+  background: var(--dsw-alias-button-floating-hover);
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.overlayLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.overlayLayer > * {
+  pointer-events: auto;
+}
+
+/* Shell reload control pinned to the window's top-right, immediately LEFT of the
+   dsh-better-sidebar toggle cluster (which owns the extreme corner at
+   top:3px/right:10px with 28px buttons + 4px gap). Matching 28px circular ghost
+   style so it reads as part of that cluster. `right` is set inline from the
+   frame (74px wide / 42px narrow) to sit flush left of the bottom-panel toggle.
+   Fixed so it stays in the corner even when a session view is blank/stalled. */
+.refresh {
+  position: fixed;
+  top: 3px;
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.refresh:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.refresh:active {
+  background: var(--dsw-alias-interactive-bg-active);
+}

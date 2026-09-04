@@ -1,0 +1,11 @@
+.composerAttachments {
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.summary {
+  margin-bottom: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}

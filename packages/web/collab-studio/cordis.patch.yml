@@ -1,0 +1,17 @@
+# dsh-collab-studio bundle patch: the multi-AI collaboration studio row.
+#
+# One host row over the web surface: it registers the /api/collab routes on
+# the shared webServer, keeps project directories (studio.json + events.jsonl
+# plus the deliverable files the role agents write) under
+# $DSH_HOME/collab-studio, and drives one full harness agent per company role
+# (CEO / CTO / product / programmer / tester / documentation) through
+# consensus meetings before every stage produces its deliverable.
+- insert:
+    - id: collab-studio
+      name: '@deepseek-ai/dsh-collab-studio'
+      inject: [webServer]
+      config:
+        enabled: true
+        maxProjects: 32
+        maxEventTail: 2000
+        maxMeetingRounds: 4

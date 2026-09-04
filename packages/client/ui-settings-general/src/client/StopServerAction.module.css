@@ -1,0 +1,58 @@
+/* Server-stop footer action: reuses the sidebar foot's 42px row / 36px rail
+   circle rhythm (the settings trigger and the other footer actions share it).
+   The confirm state tints the row toward the destructive intent without
+   inventing a new color token: the hover fill plus a stronger label weight
+   carry the state change, copy does the rest. */
+
+.root {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 0 -2px;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.root:hover:not(:disabled),
+.root:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.root:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* Two-stage confirm: keep the hover fill latched so the row reads as armed. */
+.root[data-phase="confirm"] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  font-weight: 500;
+}
+
+.label {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Rail variant: the same 36x36 circle box as the other rail controls. */
+.rail {
+  width: 36px;
+  height: 36px;
+  margin: 0 0 4px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 50%;
+}

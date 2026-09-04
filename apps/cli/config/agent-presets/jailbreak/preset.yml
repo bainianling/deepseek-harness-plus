@@ -1,0 +1,3 @@
+name: 破甲模式
+description: 具备标准模式的全部能力，并对所有模型自动启用破甲（jailbreak）注入，用于红队安全评估。选择后每次请求自动携带所选策略的破甲指令；默认策略为 authorized-ctf，可经 `/jailbreak` 切换为 tvd-guard 等其他内置策略。
+order: 5
