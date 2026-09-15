@@ -62,7 +62,12 @@ export function inspectRequestPrompt(
   const rawTools: unknown = header.tools
   const prompt: ConversationPromptSnapshot = {
     config: header.config,
-    system: header.system ?? '',
+    // The release line derives the rendered system prompt from a
+    // `system/message` history node instead of the request header, so the
+    // header no longer carries it; the legacy field is still honoured when a
+    // producer supplies one, and the inspection panel shows no system text
+    // otherwise.
+    system: (header as { readonly system?: string }).system ?? '',
     tools: Array.isArray(rawTools) ? rawTools as readonly ToolSchema[] : [],
   }
   if (previous === undefined && event.data.reason !== 'initial') return { prompt }

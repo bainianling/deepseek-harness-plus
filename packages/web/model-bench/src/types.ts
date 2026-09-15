@@ -154,7 +154,12 @@ export interface BenchAgentLike {
   readonly status: 'idle' | 'running'
   readonly session: {
     readonly id: string
-    readonly events: readonly { readonly type: string; readonly seq: number; readonly data: unknown }[]
+    /** Current Session API: read the append-only log through seq/snapshotEvents. */
+    readonly seq: number
+    snapshotEvents(
+      fromSeq?: number,
+      toSeqExclusive?: number,
+    ): readonly { readonly type: string; readonly seq: number; readonly data: unknown }[]
     readonly header: { readonly seedLength?: number }
   }
   followup(message: unknown): void
@@ -203,13 +208,21 @@ export interface BenchSlotDriver {
 
 /** Deployment limits accepted by the plugin row config. */
 export interface BenchConfig {
+  /** Enable the model benchmark routes and service. */
   readonly enabled?: boolean
+  /** Absolute data directory for persisted rounds. */
   readonly dataDir?: string
+  /** Maximum number of persisted rounds. */
   readonly maxRounds?: number
+  /** Maximum number of retained events returned per round. */
   readonly maxEventTail?: number
+  /** Maximum contestants permitted in one round. */
   readonly maxContestantsPerRound?: number
+  /** Per-contestant execution timeout in milliseconds. */
   readonly contestantTimeoutMs?: number
+  /** Question-generation timeout in milliseconds. */
   readonly generateTimeoutMs?: number
+  /** Judge-agent timeout in milliseconds. */
   readonly judgeTimeoutMs?: number
 }
 

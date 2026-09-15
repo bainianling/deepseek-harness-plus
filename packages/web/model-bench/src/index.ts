@@ -19,7 +19,7 @@ import { AgentSlotDriver, BenchAbortedError } from './driver.ts'
 import { assignContestants, generateQuestion, runContestPhase } from './engine.ts'
 import { CATEGORIES } from './prompts.ts'
 import { BenchStore, BenchStoreError, defaultDataDir, normalizeCreateRequest, normalizeStartRequest } from './store.ts'
-import type { BenchAgentsLike, BenchDefaultModelLike, BenchLlmLike, BenchPresetsLike, ResolvedBenchConfig, RoundRecord } from './types.ts'
+import type { BenchAgentsLike, BenchConfig, BenchDefaultModelLike, BenchLlmLike, BenchPresetsLike, ResolvedBenchConfig, RoundRecord } from './types.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'model-bench'
@@ -35,16 +35,74 @@ declare module '@deepseek-ai/cordis' {
 
 /** The `modelBench` service surface other rows may use. */
 export interface ModelBenchService {
+  /**
+   * List persisted benchmark rounds.
+   * @returns persisted benchmark round records.
+   */
   listRounds(): Promise<unknown>
+  /**
+   * Create one benchmark round from a user request.
+   * @param request - untrusted round creation input.
+   * @returns the created benchmark round.
+   */
   createRound(request: unknown): Promise<RoundRecord>
+  /**
+   * Read one round together with its question material.
+   * @param roundId - persisted round identifier.
+   * @returns round detail data.
+   */
   getRound(roundId: string): Promise<unknown>
+  /**
+   * Start question generation for one round.
+   * @param roundId - persisted round identifier.
+   * @returns whether generation was started.
+   */
   generateRound(roundId: string): Promise<{ started: boolean; reason?: string }>
+  /**
+   * Start contestant execution for one round.
+   * @param roundId - persisted round identifier.
+   * @param request - untrusted contestant and judge selection input.
+   * @returns whether the contest was started.
+   */
   startRound(roundId: string, request: unknown): Promise<{ started: boolean; reason?: string }>
+  /**
+   * Stop one running benchmark round.
+   * @param roundId - persisted round identifier.
+   * @returns whether an active round was stopped.
+   */
   stopRound(roundId: string): Promise<{ stopped: boolean }>
+  /**
+   * Delete one round after stopping any active run.
+   * @param roundId - persisted round identifier.
+   * @returns whether the round was deleted.
+   */
   deleteRound(roundId: string): Promise<{ deleted: boolean }>
+  /**
+   * Read a bounded round event page.
+   * @param roundId - persisted round identifier.
+   * @param after - exclusive event cursor.
+   * @param limit - maximum number of events.
+   * @returns the event page and total count.
+   */
   events(roundId: string, after: number, limit: number): Promise<{ events: unknown[]; total: number }>
+  /**
+   * List files generated for one round.
+   * @param roundId - persisted round identifier.
+   * @returns round-relative file paths.
+   */
   files(roundId: string): Promise<string[]>
+  /**
+   * Read one bounded generated round file.
+   * @param roundId - persisted round identifier.
+   * @param path - round-relative file path.
+   * @returns file text and truncation status.
+   */
   readFile(roundId: string, path: string): Promise<{ text: string; truncated: boolean }>
+  /**
+   * Report whether one benchmark round is active.
+   * @param roundId - persisted round identifier.
+   * @returns whether the round has an active run.
+   */
   isRunning(roundId: string): boolean
 }
 
@@ -159,7 +217,7 @@ interface RunEntry {
  * @param ctx - plugin context carrying the webServer service.
  * @param rawConfig - the composition row config (coerced defensively).
  */
-export function apply(ctx: Context, rawConfig: unknown): void {
+export function apply(ctx: Context, rawConfig: BenchConfig): void {
   const config = resolveBenchConfig(rawConfig)
   if (!config.enabled) return
   const webServer = ctx.get('webServer') as WebServerLike | undefined
@@ -191,7 +249,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
 
   // Seed images for vision rounds are maintained best-effort at startup.
   void ensureSeedImages(store.assetsImagesDir())
-    .then(names => { ctx.logger.info(`model-bench: ${String(names.length)} seed images ready`) })
+    .then((names) => { ctx.logger.info(`model-bench: ${String(names.length)} seed images ready`) })
     .catch((error: unknown) => {
       ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
     })
@@ -212,7 +270,11 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   /** Shared runner: registers one phase execution under the run registry. */
   const launch = async (
     roundId: string,
-    phase: (driver: AgentSlotDriver, controller: AbortController, emit: (type: string, data: Record<string, unknown>) => Promise<void>) => Promise<void>,
+    phase: (
+      driver: AgentSlotDriver,
+      controller: AbortController,
+      emit: (type: string, data: Record<string, unknown>) => Promise<void>,
+    ) => Promise<void>,
     onDone: (record: RoundRecord) => Promise<void>,
     onAbort: (record: RoundRecord) => Promise<void>,
     onFailed: (record: RoundRecord, message: string) => Promise<void>,
@@ -479,7 +541,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     handler: (req, res) => {
       if (req.method === 'GET' || req.method === 'HEAD') {
         void service.listRounds()
-          .then(rounds => { writeJson(res, 200, { rounds }) })
+          .then((rounds) => { writeJson(res, 200, { rounds }) })
           .catch(() => { writeJson(res, 500, { error: 'listing rounds failed' }) })
         return
       }
@@ -550,7 +612,11 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       const url = new URL(req.url ?? '/', 'http://x')
       const after = Number(url.searchParams.get('after') ?? '0')
       const limit = Number(url.searchParams.get('limit') ?? '300')
-      const result = await service.events(roundId, Number.isFinite(after) && after > 0 ? Math.floor(after) : 0, Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 300)
+      const result = await service.events(
+        roundId,
+        Number.isFinite(after) && after > 0 ? Math.floor(after) : 0,
+        Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 300,
+      )
       writeJson(res, 200, result)
       return
     }
@@ -615,7 +681,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     for (const run of pending) run.controller.abort()
     return Promise.race([
       Promise.allSettled(pending.map(run => run.done)),
-      new Promise<void>(resolve => {
+      new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 10_000)
         if (typeof timer.unref === 'function') timer.unref()
       }),

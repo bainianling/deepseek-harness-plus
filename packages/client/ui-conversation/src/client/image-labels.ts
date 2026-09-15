@@ -32,12 +32,9 @@ export function attachmentErrorText(
 ): string {
   switch (reason) {
     case 'MODEL_DOES_NOT_SUPPORT_IMAGES': return t('image.modelUnsupported')
-    case 'SUBAGENT_IMAGE_UNSUPPORTED': return t('image.subagentUnsupported')
-    case 'SUBAGENT_FILE_UNSUPPORTED': return t('file.subagentUnsupported')
-    case 'TOO_MANY_FILES': return t('file.tooMany', { count: 20 })
-    case 'FILE_TOO_LARGE': return t('file.fileTooLarge', { size: imageSizeText(20 * 1024 * 1024) })
-    case 'FILES_TOO_LARGE': return t('file.totalTooLarge', { size: imageSizeText(200 * 1024 * 1024) })
-    case 'FILE_IMPORT_FAILED': return t('file.importFailed', { reason })
+    // A prompt cited a file the Host has no staged upload for (expired
+    // process, foreign id): solvable by re-adding the file.
+    case 'FILE_NOT_STAGED': return t('file.notStaged')
     case 'IMAGE_TOO_MANY_PIXELS': return t('image.tooManyPixels')
     case 'IMAGE_DIMENSION_TOO_LARGE':
       if (limits !== undefined) return t('image.dimensionTooLarge', { size: limits.maxImageDimension })

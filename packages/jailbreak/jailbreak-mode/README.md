@@ -1,6 +1,28 @@
+---
+description: "Logged per-agent jailbreak-mode evaluation plugin with strategy injection, durable projection, commands, and optional TVD validation."
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-jailbreak-mode
 
 English | [中文](README.zh.md)
+
+## Summary
+
+`dsh-jailbreak-mode` provides a logged, per-agent evaluation mode for red-team safety testing. It owns strategy selection, prompt rewriting, optional TVD scaffolding, the `/jailbreak` command, and the session projection consumed by clients.
+
+## Table of Contents
+
+- [Durable state](#durable-state)
+- [Model and human interactions](#model-and-human-interactions)
+- [Session projection](#session-projection)
+- [Built-in strategies](#built-in-strategies)
+- [Configuration](#configuration)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
 
 Logged, per-agent jailbreak mode for red-team safety evaluation: while active, the selected strategy's instruction block is appended to the system prompt of every model request, and each claimed user message is wrapped with the strategy's prefix/suffix before it reaches the model. The `/jailbreak [off|strategy]` command enters, exits, and switches strategies.
 
@@ -46,6 +68,11 @@ The package ships eleven public, widely documented jailbreak techniques for repr
 - `validatorModel` (optional, default empty): classifier model name substituted for `{{validatorModel}}` in scaffolded TVD files. Required for `tvd-guard` to run its validator; unset or empty degrades it to the prompt-only variant.
 
 Strategies are the built-in table; a deployment that needs its own templates can extend the exported table or patch the package.
+
+<a id="dev-note"></a>
+## Dev Note
+
+Keep the command vocabulary, logged event, projection key, strategy table, and client control aligned. Changes to prompt-visible behavior must update the session event contract and the relevant recorded-session snapshot.
 
 ## Model Experience
 

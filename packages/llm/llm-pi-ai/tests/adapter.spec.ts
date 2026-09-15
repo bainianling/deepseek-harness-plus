@@ -293,6 +293,60 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.requests[0]).not.toHaveProperty('prompt_cache_options')
   })
 
+  it('injects a configured repetition penalty into completions payloads only', async () => {
+    const server = await mockServer([
+      { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },
+      { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        acme: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-completions',
+          baseURL: `${server.url}/v1`,
+          repetitionPenalty: 1.1,
+          models: [{ id: 'acme-large' }],
+        },
+        'acme-responses': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-responses',
+          baseURL: `${server.url}/v1`,
+          repetitionPenalty: 1.1,
+          models: [{ id: 'acme-cache', contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    })
+
+    await assemble(ctx, { provider: 'acme', model: 'acme-large', messages: [] })
+    await assemble(ctx, { provider: 'acme-responses', model: 'acme-cache', messages: [] })
+
+    expect(server.paths).toEqual(['/v1/chat/completions', '/v1/responses'])
+    expect(server.requests[0]).toMatchObject({ repetition_penalty: 1.1 })
+    expect(server.requests[1]).not.toHaveProperty('repetition_penalty')
+  })
+
+  it('sends no repetition penalty when the profile configures none', async () => {
+    const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        acme: {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-completions',
+          baseURL: `${server.url}/v1`,
+          models: [{ id: 'acme-large' }],
+        },
+      },
+    })
+
+    await assemble(ctx, { provider: 'acme', model: 'acme-large', messages: [] })
+
+    expect(server.requests[0]).not.toHaveProperty('repetition_penalty')
+  })
+
   it('routes equivalent OpenAI Responses prefixes to one cache key while preserving session affinity', async () => {
     const server = await mockServer([
       { status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) },

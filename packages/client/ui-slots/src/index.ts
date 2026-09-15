@@ -201,6 +201,14 @@ export interface SessionMaybeStandardProps {}
 export interface GlobalStandardProps {}
 
 /**
+ * The resource-protocol vocabulary's zero-dependency merge point: each protocol
+ * owner merges its own member into this map, and a consumer names the protocol
+ * as a type argument to receive the owner's value type without importing the
+ * owner's runtime. The resource service itself lives in `dsh-client-resources`.
+ */
+export interface ResourceProtocolMap {}
+
+/**
  * The session id type as `ui-session`'s SessionStandardProps merge declares it
  * (branded); falls back to `string` in programs without the merge (this
  * package's own tests).

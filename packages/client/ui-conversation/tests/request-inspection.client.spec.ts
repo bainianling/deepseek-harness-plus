@@ -8,7 +8,9 @@ const CONFIG = { provider: 'test', model: 'test' }
 function header(
   seq: SessionSeq,
   reason: SessionEvent<'request/header'>['data']['reason'],
-  value: SessionEvent<'request/header'>['data']['header'],
+  // The legacy rendered-system field: the release line no longer writes it into
+  // the header, but the inspector still honours it when present.
+  value: SessionEvent<'request/header'>['data']['header'] & { readonly system?: string },
 ): SessionEvent<'request/header'> {
   return {
     type: 'request/header',

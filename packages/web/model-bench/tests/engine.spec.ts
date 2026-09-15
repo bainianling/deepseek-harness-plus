@@ -172,7 +172,7 @@ describe('bench engine', () => {
     it('honors the generate timeout', async () => {
       const record = await makeRound()
       const driver = new FakeSlotDriver(async () => {
-        await new Promise(resolve => { setTimeout(resolve, 300) })
+        await new Promise((resolve) => { setTimeout(resolve, 300) })
         return 'too late'
       })
       const { deps: engine } = deps(driver, { generateMs: 50 })
@@ -253,7 +253,7 @@ describe('bench engine', () => {
       assignContestants(record, [{ provider: 'slow', model: 'poke' }], undefined)
       await store.save(record)
       const driver = new FakeSlotDriver(async () => {
-        await new Promise(resolve => { setTimeout(resolve, 400) })
+        await new Promise((resolve) => { setTimeout(resolve, 400) })
         return 'late'
       })
       const { deps: engine } = deps(driver, { contestantMs: 60 })

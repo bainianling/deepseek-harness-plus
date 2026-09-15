@@ -46,15 +46,22 @@ describe('ui-layout client apply', () => {
     expect(slots.spec('details')).toEqual({ kind: 'single', scope: 'session' })
   })
 
-  it('injects no business face and attaches the layout actions', async () => {
+  it('injects the creation capability and attaches the layout actions', async () => {
     const { ctx, slots } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const actions = {
       setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
     }
-    const injected = (slots.entries('root')[0]!.inject as (actions: never) => object)(actions as never)
-    expect(injected).toEqual({})
+    const injected = (slots.entries('root')[0]!.inject as (actions: never) => Record<string, unknown>)(actions as never)
+    // The frame's own inject carries exactly the creation capability the
+    // conversation-create pane calls. `useWorkspaces` is deliberately NOT here:
+    // the Workspace UI publishes it as a root standard hook, and a second
+    // contribution under the same prop name is rejected by the renderer.
+    expect(Object.keys(injected)).toEqual(['createConversation'])
+    const creator = injected['createConversation'] as { create: unknown; listOptions: unknown }
+    expect(typeof creator.create).toBe('function')
+    expect(typeof creator.listOptions).toBe('function')
     const layout = ctx.get('layout') as LayoutController
     layout.toggleSidebar()
     expect(actions.toggleSidebar).toHaveBeenCalledOnce()

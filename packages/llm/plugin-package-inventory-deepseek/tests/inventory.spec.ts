@@ -163,8 +163,44 @@ describe('DeepSeek plugin package inventory', () => {
     ctx.loader.internal = {
       version: 'v2',
       import: async () => ({ default: () => {} }),
+      resolveSync: () => {
+        throw Object.assign(new Error("Cannot find package 'missing-package'"), { code: 'ERR_MODULE_NOT_FOUND' })
+      },
     } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.loader.create({ name: 'missing-package' })
+    await expect(ctx.deepseekLlmApiExtensions.prepare({ body: { messages: [] }, signal: SIGNAL }))
+      .rejects.toThrow(/cannot resolve active package/)
+  })
+
+  it('resolves a bare entry only reachable through the Loader internal resolver', async () => {
+    // Simulates a dev process whose loader resolves bare names outside any
+    // static node_modules layout (TypeScript path aliases, pnpm hoist): the
+    // CJS anchor probe misses, so the inventory must fall back to the same
+    // internal resolver that imported the entry.
+    const { ctx, root } = await harness()
+    const resolvedUrl = pathToFileURL(join(root, 'alias-package/plugin.mjs')).href
+    ctx.loader.internal = {
+      version: 'v2',
+      import: async () => ({ default: () => {} }),
+      resolveSync: (_baseUrl: string, request: { specifier: string }) => {
+        const name = request.specifier.split('/')[0] ?? request.specifier
+        return { url: resolvedUrl.replace('alias-package', name), format: 'module' }
+      },
+    } as unknown as NonNullable<typeof ctx.loader.internal>
+    await packagePlugin(root, 'alias-package', { name: 'alias-package', version: '5.0.0' })
+    await ctx.loader.create({ name: 'alias-package/plugin.mjs' })
+    const prepared = await ctx.deepseekLlmApiExtensions.prepare({ body: { messages: [] }, signal: SIGNAL })
+    expect(prepared.fields.dsh_plugin_packages?.packages).toContainEqual({ name: 'alias-package', version: '5.0.0' })
+  })
+
+  it('reports the loader-reported identity when the internal resolver URL has no owning manifest', async () => {
+    const { ctx } = await harness()
+    ctx.loader.internal = {
+      version: 'v2',
+      import: async () => ({ default: () => {} }),
+      resolveSync: () => ({ url: 'https://plugins.example/ghost.mjs', format: 'module' }),
+    } as unknown as NonNullable<typeof ctx.loader.internal>
+    await ctx.loader.create({ name: 'ghost-package' })
     await expect(ctx.deepseekLlmApiExtensions.prepare({ body: { messages: [] }, signal: SIGNAL }))
       .rejects.toThrow(/cannot resolve active package/)
   })

@@ -1,7 +1,8 @@
 /** Driver pure helpers: message shape and reply extraction. */
 
 import { describe, expect, it } from 'vitest'
-import { extractReplyText, makeUserMessage } from '../src/driver.ts'
+import { AgentSlotDriver, extractReplyText, makeUserMessage } from '../src/driver.ts'
+import type { BenchAgentsLike } from '../src/types.ts'
 
 describe('makeUserMessage', () => {
   it('builds one frozen harness-shaped user message', () => {
@@ -51,5 +52,41 @@ describe('extractReplyText', () => {
 
   it('returns empty without assistant events after the boundary', () => {
     expect(extractReplyText([assistant('旧消息')], 1)).toBe('')
+  })
+})
+
+describe('AgentSlotDriver', () => {
+  it('reads the current Session API instead of the removed session.events array', async () => {
+    const events: { type: string; seq: number; data: unknown }[] = []
+    const agent = {
+      id: 'agent-1',
+      status: 'idle' as const,
+      session: {
+        id: 'session-1',
+        get seq() { return events.length },
+        snapshotEvents(fromSeq = 0) { return events.slice(fromSeq) },
+        header: {},
+      },
+      followup() {
+        events.push({
+          type: 'assistant/message',
+          seq: events.length,
+          data: { message: { content: [{ type: 'text', text: '已完成' }] } },
+        })
+      },
+      cancel() {},
+      whenIdle: async () => {},
+    }
+    const agents: BenchAgentsLike = {
+      async create(options) {
+        await options.setup?.({ on: () => () => {} })
+        return { agent, dispose: async () => {} }
+      },
+    }
+    const driver = new AgentSlotDriver(agents, undefined)
+
+    await driver.ensureSlot('generator', 'C:/bench/question')
+    await expect(driver.run('generator', '开始出题', new AbortController().signal)).resolves.toBe('已完成')
+    await driver.disposeAll()
   })
 })

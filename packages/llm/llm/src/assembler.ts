@@ -197,6 +197,7 @@ export class BlockAssembler {
     return this.assembled().replay
   }
 
+
   /**
    * The assembled assistant message.
    * @param source - producer attribution for the assembled message.

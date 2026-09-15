@@ -66,7 +66,7 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       type="button"
     >
       <svg
-        data-content="b7af88db"
+        data-content="2a91a8d7"
         fill="none"
         height="18"
         viewBox="0 0 16 16"
@@ -240,7 +240,7 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       type="button"
     >
       <svg
-        data-content="b7af88db"
+        data-content="2a91a8d7"
         fill="none"
         height="14"
         viewBox="0 0 16 16"
@@ -419,7 +419,7 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       type="button"
     >
       <svg
-        data-content="b7af88db"
+        data-content="2a91a8d7"
         fill="none"
         height="14"
         viewBox="0 0 16 16"

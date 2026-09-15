@@ -35,11 +35,22 @@ export async function buildModelCatalog(
               ? {}
               : { defaultEffort: resolved.reasoning.defaultEffort }),
           }
+        const capabilities = resolved.capabilities === undefined
+          ? undefined
+          : {
+            protocol: resolved.capabilities.protocol,
+            state: resolved.capabilities.state,
+            promptCaching: resolved.capabilities.promptCaching,
+            nativeCompaction: resolved.capabilities.nativeCompaction,
+            background: resolved.capabilities.background,
+            parallelToolCalls: resolved.capabilities.parallelToolCalls,
+          }
         return {
           id: model.id,
           name: model.name,
           ...(model.description === undefined ? {} : { description: model.description }),
           ...(reasoning === undefined ? {} : { reasoning }),
+          ...(capabilities === undefined ? {} : { capabilities }),
         }
       }))
       return {

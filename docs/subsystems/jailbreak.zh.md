@@ -70,7 +70,7 @@ get(agent: Agent): JailbreakState & { pending?: JailbreakState }
  * was cleared; the logged state already matches), or `noop` (already in that
  * state).
  */
-set(agent: Agent, active: boolean, strategy: string = foldJailbreakMode(agent.session.events).strategy): 'committed' | 'queued' | 'cancelled' | 'noop'
+set(agent: Agent, active: boolean, strategy: string = foldJailbreakMode(agent.session.snapshotEvents()).strategy): 'committed' | 'queued' | 'cancelled' | 'noop'
 ```
 
 Types: [Agent](core.zh.md)

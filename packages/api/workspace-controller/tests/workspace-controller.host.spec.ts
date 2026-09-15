@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -23,8 +23,12 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
 const roots: Context[] = []
 
+/** Workspace roots created per test, removed after their context settles. */
+const tempDirs: string[] = []
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(ctx => ctx.fiber.dispose()))
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
 interface Deferred<T> {
@@ -40,6 +44,7 @@ function deferred<T>(): Deferred<T> {
 
 async function harness() {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-workspace-controller-')))
+  tempDirs.push(root)
   const ctx = new Context()
   roots.push(ctx)
   await ctx.plugin(SessionStore)
@@ -296,7 +301,7 @@ describe('WorkspaceController commands', () => {
       .rejects.toMatchObject({ failure: { code: 'session-not-found' } })
 
     const cold = SessionId('cold')
-    persistedHeaders.push({ version: 0, id: cold, createdAt: 1, isSeeded: false })
+    persistedHeaders.push({ version: 3, id: cold, createdAt: 1, isSeeded: false })
     await expect(controller.deleteSession({ sessionId: cold }))
       .resolves.toEqual({ deleted: true })
     expect(deletePersisted).toHaveBeenCalledWith(cold)

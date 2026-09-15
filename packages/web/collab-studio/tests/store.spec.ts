@@ -88,6 +88,51 @@ describe('StudioStore', () => {
     expect(loaded.error).toContain('重启')
   })
 
+  it('leaves a live running project untouched so a status read is not a false crash', async () => {
+    // Reading a project whose run this process still owns must not rewrite it:
+    // the old behavior reported "进程重启" for a healthy run and raced the
+    // engine's own saves.
+    const record = await store.create({ requirement: 'live one' }, 10)
+    record.status = 'running'
+    record.currentStage = 'requirements'
+    await store.save(record)
+
+    const loaded = await store.load(record.id, id => id === record.id)
+    expect(loaded.status).toBe('running')
+    expect(loaded.error).toBeUndefined()
+    // The record on disk is unchanged too, not just the returned copy.
+    const onDisk = JSON.parse(await readFile(join(root, record.id, 'studio.json'), 'utf8')) as {
+      status: string
+      error?: string
+    }
+    expect(onDisk.status).toBe('running')
+    expect(onDisk.error).toBeUndefined()
+  })
+
+  it('still reconciles a running project whose run this process does not own', async () => {
+    const record = await store.create({ requirement: 'orphan one' }, 10)
+    record.status = 'running'
+    await store.save(record)
+    // The predicate answers false for every project: nothing is live here.
+    const loaded = await store.load(record.id, () => false)
+    expect(loaded.status).toBe('stopped')
+    expect(loaded.error).toContain('重启')
+  })
+
+  it('forwards run liveness through list()', async () => {
+    const live = await store.create({ requirement: 'live list' }, 10)
+    live.status = 'running'
+    await store.save(live)
+    const dead = await store.create({ requirement: 'dead list' }, 10)
+    dead.status = 'running'
+    await store.save(dead)
+
+    const summaries = await store.list(id => id === live.id)
+    const byId = new Map(summaries.map(summary => [summary.id, summary]))
+    expect(byId.get(live.id)?.status).toBe('running')
+    expect(byId.get(dead.id)?.status).toBe('stopped')
+  })
+
   it('rejects loading an unknown project', async () => {
     await expect(store.load('missing')).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })

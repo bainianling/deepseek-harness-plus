@@ -20,6 +20,7 @@ import type {
   ModelModality,
   ResolvedRetryPolicy,
   StreamChunk,
+  SystemPromptUpdate,
 } from '@deepseek-ai/dsh-llm'
 import type {
   AttachmentId,
@@ -63,6 +64,12 @@ export interface DeepSeekCatalogModel {
   imagePixelBudget?: number | 'low'
   /** Encoded-byte target for one deterministic request preview; the smallest quality-ladder output is used when no quality fits. */
   imageMaxBytes?: number
+  /**
+   * `'in-history'` declares that the endpoint reads the latest `system`
+   * message at any position of the conversation as the complete effective
+   * system prompt; omission means only a leading system message is read.
+   */
+  systemPromptUpdate?: SystemPromptUpdate
 }
 
 /**
@@ -81,7 +88,7 @@ export interface DeepSeekConnectionOptions {
    * only this name — a literal key is not a configuration value.
    */
   apiKeyEnv: CredentialRef
-  /** Request defaults applied to every call (thinking mode, effort). */
+  /** Request defaults applied to every call (thinking mode, effort, repetition penalty). */
   defaults: RequestDefaults
   /** Default per-request output cap; explicit request values win. */
   maxTokens: number
@@ -308,6 +315,16 @@ function modelInfo(provider: string, model: DeepSeekCatalogModel): LlmModelInfo 
   }
 }
 
+/** Features implemented by the direct DeepSeek chat-completions adapter. */
+const DEEPSEEK_MODEL_CAPABILITIES = {
+  protocol: 'chat-completions',
+  state: 'client-replay',
+  promptCaching: 'provider',
+  nativeCompaction: false,
+  background: false,
+  parallelToolCalls: true,
+} as const
+
 function providerRetryAfterMs(value: string | null): number | undefined {
   if (value === null) return undefined
   if (/^\d+$/.test(value)) {
@@ -407,6 +424,8 @@ export class DeepSeekAdapter extends LlmAdapter {
         : modelInfo(provider, configured),
       context: { contextWindow },
       defaultMaxTokens: configured?.maxTokens ?? connection.maxTokens,
+      capabilities: DEEPSEEK_MODEL_CAPABILITIES,
+      ...configured?.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: configured.systemPromptUpdate },
       ...connection.defaults.thinking === 'disabled'
         ? {
           reasoning: {

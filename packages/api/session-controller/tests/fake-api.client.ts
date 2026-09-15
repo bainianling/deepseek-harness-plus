@@ -9,6 +9,7 @@ import type {
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
   SessionAddress,
+  SessionAssistantStreamBaseline,
   SessionControlBaseline,
   SessionControlFrame,
   SessionFollowFrame,
@@ -16,6 +17,8 @@ import type {
   SessionPage,
   SessionPageRequest,
   SessionProjectionBaseline,
+  SessionModelEnvironmentRequest,
+  SessionModelEnvironmentValue,
   SessionSelectModelRequest,
   SessionSelectModelValue,
   SessionTerminalCloseValue,
@@ -33,6 +36,7 @@ import {
   type RemoteStreamOptions,
 } from '@deepseek-ai/dsh-api-gateway/client'
 import type { SessionRemotes } from '../src/client/sessions/remotes.ts'
+import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session/types'
 import { historyRecordLastSeq } from '../src/client/sessions/history-records.ts'
 
 const AVAILABLE_STREAM_CONNECTION = {
@@ -140,6 +144,20 @@ export class FakeApiClient {
           : { reasoningEffort: payload.reasoningEffort }),
       },
     }))
+  onModelEnvironment: (payload: SessionModelEnvironmentRequest) => Promise<RemoteResult<SessionModelEnvironmentValue>> =
+    () => Promise.resolve(ok({
+      plan: {
+        route: { provider: 'fixture', model: 'fixture' },
+        preset: 'default',
+        protocol: 'fixture',
+        state: 'client-replay',
+        promptCaching: 'none',
+        compaction: 'basic',
+        background: 'foreground',
+        parallelToolCalls: false,
+        reasons: [],
+      },
+    }))
   onRename: (payload: unknown) => Promise<RemoteResult<{ title: string; seq: number }>> = () => Promise.resolve(ok({ title: 'fk-renamed', seq: 0 }))
   onFork: (payload: unknown) => Promise<RemoteResult<{ sessionId: SessionId }>> = () => Promise.resolve(ok({ sessionId: 'fk-fork' as SessionId }))
   onHistory: (payload: { sessionId: SessionId; throughSeq?: number; beforeSeq?: number; maxMessages?: number })
@@ -184,6 +202,9 @@ export class FakeApiClient {
     queues: {},
     jobs: {},
     projections: {},
+  }
+  assistantStreamBaseline: SessionAssistantStreamBaseline = {
+    revision: 0,
   }
   workspaceBaseline: Extract<WorkspaceFollowFrame, { type: 'baseline' }>['value'] = {
     items: [],
@@ -235,6 +256,12 @@ export class FakeApiClient {
       },
       session: {
         canOpenWorkspacePath: () => Promise.resolve(ok(true)),
+        enhancePrompt: payload => Promise.resolve(ok({ prompt: payload.prompt })),
+        // Neutral dual-model stub owned by the in-flight model-roles workline;
+        // typed by the generated namespace, behaviorless here.
+        selectModelRoles: payload => Promise.resolve(ok({
+          roles: { enabled: payload.enabled, thinking: payload.thinking, worker: payload.worker },
+        })),
         list: payload => this.record('session.list', payload, this.onList(payload)),
         modelCatalog: () => Promise.resolve({
           ok: true,
@@ -245,6 +272,11 @@ export class FakeApiClient {
             failures: [],
           },
         }),
+        modelEnvironment: payload => this.record(
+          'session.modelEnvironment',
+          payload,
+          this.onModelEnvironment(payload),
+        ),
         search: (payload, signal) => {
           this.lastSearchSignal = signal
           return this.record('session.search', payload, this.onSearch(payload))
@@ -335,7 +367,7 @@ export class FakeApiClient {
   /** Push one live Session event to every follower of that Session. */
   async pushFollow(
     sessionId: SessionId,
-    frame: Extract<SessionFollowFrame, { type: 'event' }>,
+    frame: Exclude<SessionFollowFrame, { type: 'snapshot' }>,
   ): Promise<void> {
     await Promise.all([...(this.followConns.get(sessionId) ?? [])].map(conn => new Promise<void>((resolve) => {
       conn.feed({ kind: 'frame', value: frame, delivered: resolve })
@@ -447,9 +479,10 @@ export class FakeApiClient {
       yield {
         type: 'snapshot',
         header: {
-          version: 0,
+          version: SESSION_FORMAT_VERSION,
           id: sessionId,
           createdAt: 0,
+          isSeeded: false,
           ...(request.address.kind === 'subagent'
             ? { origin: 'subagent' as const, parentSession: request.address.parentSessionId }
             : {}),
@@ -458,6 +491,9 @@ export class FakeApiClient {
         records: page.records.filter(record => historyRecordLastSeq(record) <= cursor),
         hasMore: page.hasMore,
         projections: page.projections ?? { asOfSeq: cursor, values: {} },
+        ...request.assistantStream === true
+          ? { assistantStream: this.assistantStreamBaseline }
+          : {},
       }
       yield* stream.values
     } finally {

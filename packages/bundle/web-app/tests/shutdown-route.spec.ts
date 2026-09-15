@@ -62,10 +62,13 @@ function fakeHttpServer(): FakeServer {
 }
 
 /** A request whose socket address and Origin header the test controls. */
-function fakeReq(method: string, remoteAddress = '127.0.0.1', origin?: string): IncomingMessage {
+function fakeReq(method: string, remoteAddress = '127.0.0.1', origin?: string, host?: string): IncomingMessage {
   return {
     method,
-    headers: origin === undefined ? {} : { origin },
+    headers: {
+      ...(origin === undefined ? {} : { origin }),
+      ...(host === undefined ? {} : { host }),
+    },
     socket: { remoteAddress },
   } as unknown as IncomingMessage
 }
@@ -106,7 +109,7 @@ describe('the /server/shutdown control route', () => {
     const ctx = new Context()
     ctx.provide('webServer', server)
     if (appExit !== undefined) ctx.provide('appExit', appExit)
-    apply(ctx, { openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 })
+    apply(ctx, { openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 })
     const registered = route()
     if (registered === undefined) throw new Error('shutdown route not registered')
     return { handler: registered.handler }
@@ -126,6 +129,19 @@ describe('the /server/shutdown control route', () => {
     expect(exit).toHaveBeenCalledWith(0)
   })
 
+  it('accepts bracketed IPv6 loopback when Host and Origin match', async () => {
+    const exit = vi.fn()
+    const { handler } = mount(exit as unknown as AppExit)
+    const res = fakeRes()
+
+    await handler(fakeReq('POST', '::1', 'http://[::1]:3080', '[::1]:3080'), res)
+
+    expect(res.status).toBe(200)
+    expect(JSON.parse(res.body)).toEqual({ ok: true })
+    vi.advanceTimersByTime(200)
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
   it('rejects non-POST methods and off-loopback sources', async () => {
     const exit = vi.fn()
     const { handler } = mount(exit as unknown as AppExit)
@@ -137,6 +153,7 @@ describe('the /server/shutdown control route', () => {
       [fakeReq('POST', '::ffff:192.168.1.5')],
       // Cross-origin browser requests are fenced like the other controls.
       [fakeReq('POST', '127.0.0.1', 'http://evil.example')],
+      [fakeReq('POST', '::1', 'http://[::1]:3080', '[::1]:3081')],
     ] as const) {
       const res = fakeRes()
       await handler(req, res)

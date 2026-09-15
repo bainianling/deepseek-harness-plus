@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/jailbreak/README.md
-README.md: 85b2677839a4d9aee1c103d14368b7aa4c09225c
-README.zh.md: c4ea278cbb49fa3af87747756e8f5b266d57b94f
+README.md: 0b308a891cd23cd01d7d3e86aa24ff69c4ea2884
+README.zh.md: 19c0e7aeda8211390ec2f7435edd1aac82cecaa3

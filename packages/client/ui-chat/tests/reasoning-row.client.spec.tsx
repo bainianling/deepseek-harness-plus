@@ -24,7 +24,7 @@ describe('ReasoningRow', () => {
       />,
     )
     expect(view.getByText('运行中')).toBeTruthy()
-    expect(view.getByText('Newest reasoning tokens').parentElement?.getAttribute('data-follow-end'))
+    expect(view.getByText('Newest reasoning tokens').closest('[data-follow-end]')?.getAttribute('data-follow-end'))
       .toBe('true')
 
     view.rerender(
@@ -35,7 +35,7 @@ describe('ReasoningRow', () => {
         renderMessageImages={renderMessageImages}
       />,
     )
-    expect(view.getByText('Newest reasoning tokens keep arriving').parentElement
+    expect(view.getByText('Newest reasoning tokens keep arriving').closest('[data-follow-end]')
       ?.getAttribute('data-follow-end')).toBe('true')
 
     view.rerender(
@@ -48,7 +48,7 @@ describe('ReasoningRow', () => {
     )
     const settledSummary = view.getByText('Inspect the session')
     expect(view.queryByText('运行中')).toBeNull()
-    expect(settledSummary.parentElement?.hasAttribute('data-follow-end')).toBe(false)
+    expect(settledSummary.closest('[data-follow-end]')).toBeNull()
   })
 
   it('expands from either Think or the reasoning summary', () => {

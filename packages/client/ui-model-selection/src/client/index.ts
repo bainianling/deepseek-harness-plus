@@ -29,6 +29,9 @@ import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
 import { ModelBalanceAction, type ModelBalanceActionInjected } from './ModelBalanceAction.tsx'
+import { PromptEnhancer, type PromptEnhancerInjected } from './PromptEnhancer.tsx'
+import { ModelRolesControl, type ModelRolesControlInjected } from './ModelRolesControl.tsx'
+import type { ModelRoles } from './model-roles.ts'
 import { en, zh, type ModelKey } from './locales.ts'
 
 export { ModelDirectory } from './directory.ts'
@@ -36,6 +39,9 @@ export type { ModelDirectoryState } from './directory.ts'
 export { ModelDirectoryResolver } from './service.ts'
 export type { ModelSelectInjected } from './slots.ts'
 export type { ModelBalanceActionInjected, ModelBalanceActionProps } from './ModelBalanceAction.tsx'
+export type { PromptEnhancerInjected } from './PromptEnhancer.tsx'
+export type { ModelRolesControlInjected } from './ModelRolesControl.tsx'
+export type { ModelRoles } from './model-roles.ts'
 export type { ModelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -171,6 +177,7 @@ export function apply(ctx: ClientContext): void {
         return {
           available,
           directory: directory.store,
+          roles: models.rolesDirectoryFor(sessionId, directory).store,
           load: () => {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },
@@ -180,6 +187,43 @@ export function apply(ctx: ClientContext): void {
         }
       },
     }, ModelSelect))
+    scope.slots.inject('conversation.input.right', () => scope.slots.register({
+      name: 'conversation.input.right',
+      id: 'prompt-enhancer',
+      order: 100,
+      locale: NS,
+      inject: (sessionId): PromptEnhancerInjected => {
+        const directory = models.directoryFor(sessionId)
+        const available = sessions.subagentAddress(sessionId) === undefined
+        return {
+          available,
+          directory: directory.store,
+          enhance: (request, signal) => scope.remote.session.enhancePrompt(request, signal),
+        }
+      },
+    }, PromptEnhancer))
+    // Entry 3: the dual-model roles control in its dedicated slot immediately
+    // after the attachment button, over the SAME shared directory.
+    scope.slots.inject('conversation.input.modelRoles', () => scope.slots.register({
+      name: 'conversation.input.modelRoles',
+      locale: NS,
+      inject: (sessionId): ModelRolesControlInjected => {
+        const directory = models.directoryFor(sessionId)
+        const roles = models.rolesDirectoryFor(sessionId, directory)
+        const available = sessions.subagentAddress(sessionId) === undefined
+        return {
+          available,
+          roles: roles.store,
+          directory: directory.store,
+          load: () => {
+            if (available) directory.load().catch(() => { /* surfaced on the store */ })
+          },
+          select: (value: ModelRoles) => available
+            ? roles.select(value)
+            : Promise.resolve(false),
+        }
+      },
+    }, ModelRolesControl))
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
       name: 'sidebar.footer.action',
       id: 'model-balance',

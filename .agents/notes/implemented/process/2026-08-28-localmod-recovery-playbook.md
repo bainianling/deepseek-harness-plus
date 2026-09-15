@@ -2,6 +2,8 @@
 
 Status: implemented
 
+English | [中文](2026-08-28-localmod-recovery-playbook.zh.md)
+
 ## Problem
 
 Upgrading `dsh-v0.1.2-alpha.1` reset the working tree to the tag, losing all uncommitted local customizations (~292 file changes: jailbreak mode, wallpaper system, LAN sharing, session move/delete, UI enhancements, and others). Without a reliable recovery procedure, future upgrades carry the same risk.
@@ -10,11 +12,11 @@ Upgrading `dsh-v0.1.2-alpha.1` reset the working tree to the tag, losing all unc
 
 The recovery playbook is archived as a permanent reference in this workspace so it is available to every future session. The full text (in Chinese, the language of the original record) is preserved below.
 
-Full original path: `F:\opencode\memory\dsh-localmod-recovery-playbook.md`
+The original path is intentionally omitted from this public copy; the playbook body below is the retained reference.
 
 ### playbook body
 
-```markdown
+````markdown
 # deepseek-harness 本地定制丢失恢复手册（2026-08-28 实战沉淀）
 
 ## 事件回顾
@@ -90,7 +92,7 @@ pnpm run typecheck  →  pnpm run build  →  pnpm run test:gui
 ### 第 7 步：外围核对
 
 - profile（`~\.dsh\profiles\web\package.json`）：bundles 规则按 runbook 问题 1 版本形态核对。
-- 桌面端（`G:\DSH-Desktop\main.js`）：按 runbook 问题 12 核对令牌认证适配。
+- 桌面端主进程：按 runbook 问题 12 核对令牌认证适配。
 - 硬编码文案：用户 WIP 原样恢复的中文硬编码（如壁纸按钮"更换壁纸"）`verify-client-ui-i18n` 会标记，属已知遗留，不阻塞。
 
 ## 本次关键事实索引
@@ -104,18 +106,18 @@ pnpm run typecheck  →  pnpm run build  →  pnpm run test:gui
 
 - HEAD：`247056840c`（脏 merge），工作树含全部恢复/移植改动（未最终提交，用户决定何时固化）
 - `pnpm run typecheck` ✅ 0 错误；`pnpm run build` ✅；`pnpm run test:gui` ✅ 291/291 文件、3842 通过
-```
+````
 
 ## Alternatives considered
 
-- **Store the playbook only at its original path `F:\opencode\memory\`** — rejected because that path is outside the workspace and inaccessible to future agent sessions.
+- **Store the playbook only outside the repository** — rejected because that location is outside the workspace and inaccessible to future agent sessions.
 - **Rewrite the playbook into English** — rejected because the original Chinese record is the authoritative source, and a translation adds cost and risk of drift.
 - **Append to AGENTS.md** — rejected because the playbook is 89 lines of operational procedure, far too long for the agent's directive file.
 
 ## Consequences
 
 - The full recovery playbook is now available to every future session in this workspace, including the exact git coordinates (`85071e49b3`, `247056840c`), the three-class file triage method, the API migration table, and the four test-diagnosis principles.
-- The playbook retains its original Chinese text, matching the language of the original record at `F:\opencode\memory\dsh-localmod-recovery-playbook.md`.
+- The playbook retains its original Chinese text, matching the language of the original record.
 - The commit snapshot procedure (`git add -A && git commit --no-verify` before any upgrade) is now explicitly documented as the critical prevention step.
 
 ## Addendum: 2026-08-28 晚 侧边栏消失事件（react 19 依赖污染）
@@ -146,11 +148,11 @@ pnpm run typecheck  →  pnpm run build  →  pnpm run test:gui
 
 **验证（2026-08-28 晚）**：根构建全绿；`test:gui` 290/291——唯一失败为手册原则 4 点名的上游 flaky（code-block 懒加载语法 5s 硬等待，并发负载下超时，单独跑绿，按决策不改上游）；无头浏览器（playwright + 启动日志里的 token URL）确认侧边栏完整渲染（品牌行/壁纸/新会话/自动化/工作区树/页脚），console 零错误。另修 `restart-dsh-web.ps1` 健康探针：信任栅栏下裸 `/` 返回 401 即视为已启动。
 
-**桌面端后续（同晚）**：agent 的替代 :3080 实例与桌面端冲突——桌面端读不到替代实例的令牌，且旧托盘实例用单实例锁吸收新的快捷方式启动（表现为"启动不了"）。处置顺序：`taskkill` 替代监听进程释放 3080 → 按 `ExecutablePath -match 'DSH-Desktop'` 全杀 Electron 托盘树 → 重启快捷方式；窗口标题变回页面标题（如 `… — DSH 本地构建`）即 SPA 加载成功。运行规则：**:3080 归桌面端所有**（`G:\DSH-Desktop\main.js` 从本仓库起服务并捕获令牌），agent 验证用的替代实例用完必须释放，否则桌面端必复现"启动不了"。
+**桌面端后续（同晚）**：agent 的替代 :3080 实例与桌面端冲突——桌面端读不到替代实例的令牌，且旧托盘实例用单实例锁吸收新的快捷方式启动（表现为"启动不了"）。处置顺序：`taskkill` 替代监听进程释放 3080 → 结束桌面端 Electron 托盘树 → 重启快捷方式；窗口标题变回页面标题（如 `… — DSH 本地构建`）即 SPA 加载成功。运行规则：**:3080 归桌面端所有**，agent 验证用的替代实例用完必须释放，否则桌面端必复现"启动不了"。
 
 **2026-08-29 复发：启动即崩 `declares no dsh.bundle`**：home profile（`~\.dsh\profiles\web\package.json`）的 `dsh.profile.bundles` 被塞入未完成包 `@deepseek-ai/dsh-client-ui-browser-panel`（无 `dsh.bundle` 声明、无补丁文件），`loadProfile` 直接 throw，服务起不来。处置：从 `bundles` 删除该行（依赖 link 保留无害）。规则：**bundles 只放有 `dsh.bundle` 声明的成品包**；脚手架包最多进 `dependencies`，进 bundles 前必须完成 bundle 三件套（`dsh.bundle` 字段 + cordis 补丁文件 + 构建产物）。复发自查加一条：服务器日志出现 `declares no dsh.bundle` 时，核对 home profile bundles 与包 manifest。
 
-**2026-08-29 白屏（孤儿窗口）**：截屏实证"白屏"是一个**孤儿加载页窗口**：`main.js` 的接管/重建路径创建新窗口时不销毁旧窗口，且 `close` 事件无条件拦截藏托盘——残留白窗既不能用也关不掉，叠在好窗口后面。修复（`G:\DSH-Desktop\main.js`）：单窗口不变量（`createMainWindow` 先 destroy 存活旧窗）；`close` 只拦截当前单例（身份比较），被取代窗口可正常关闭；`startServerAndOpenWindow` 第 5 步 loadURL 前 destroy 所有杂窗；另保留 `show → webContents.invalidate()` 防托盘再显示合成器白屏。复发自查：白屏先截屏数窗口；双窗 = 孤儿窗口（重启生效新逻辑）；单窗白且 diag 无 `render-process-gone` = 合成器白屏（刷新按钮/重启）；有 `render-process-gone` = 问题三链。
+**2026-08-29 白屏（孤儿窗口）**：截屏实证"白屏"是一个**孤儿加载页窗口**：`main.js` 的接管/重建路径创建新窗口时不销毁旧窗口，且 `close` 事件无条件拦截藏托盘——残留白窗既不能用也关不掉，叠在好窗口后面。修复：单窗口不变量（`createMainWindow` 先 destroy 存活旧窗）；`close` 只拦截当前单例（身份比较），被取代窗口可正常关闭；`startServerAndOpenWindow` 第 5 步 loadURL 前 destroy 所有杂窗；另保留 `show → webContents.invalidate()` 防托盘再显示合成器白屏。复发自查：白屏先截屏数窗口；双窗 = 孤儿窗口（重启生效新逻辑）；单窗白且 diag 无 `render-process-gone` = 合成器白屏（刷新按钮/重启）；有 `render-process-gone` = 问题三链。
 
 **浮光（fuguang）"绑定启动"排查（2026-08-29）**：harness 全链路（main.js、`dsh-update-on-startup.ps1`、个人插件、profile 插件包）grep 无浮光引用，**无绑定代码**。真因是注册表 `HKCU\...\Run` 两个浮光登录自启动项：`electron.app.浮光`（打包版，有数据）与 `electron.app.Electron`（裸 dev electron，无数据空白窗）——登录自启与 harness 启动时机重合造成绑定错觉。按用户选择已删 `electron.app.Electron`、保留打包版；并结束残留的 `npm --prefix F:/fuguang run dev/app` dev 进程树。复发自查：再有"无数据浮光自启"，先查注册表 Run 与 fuguang 进程父链，不要怀疑 harness。
 

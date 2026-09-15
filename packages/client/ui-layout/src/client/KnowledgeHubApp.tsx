@@ -2,14 +2,16 @@
  * Knowledge center: a read-only management view over the Host-owned knowledge
  * projection. Hindsight remains replaceable behind `/api/knowledge`.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  Button,
   IconDataOutline16,
   IconFileOutline16,
   IconFolderOpenOutline16,
   IconKnowledgeOutline16,
   IconLoadingOutline16,
+  IconPlayOutline16,
   IconRefreshOutline16,
   IconSearchOutline16,
   IconWarningOutline16,
@@ -19,12 +21,22 @@ import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AppFrameProps } from './AppFrame.tsx'
 import css from './KnowledgeHubApp.module.css'
 
+type KnowledgeDaemonStatus = 'online' | 'offline' | 'starting' | 'error'
+
 interface KnowledgeSource {
   kind: 'hindsight'
-  status: 'online' | 'offline'
+  status: KnowledgeDaemonStatus
   bankId: string
   readOnly: boolean
   syncedAt?: string
+}
+
+interface KnowledgeLifecycleStatus {
+  status: KnowledgeDaemonStatus
+  errorCode: string | null
+  message: string | null
+  startedAt: string | null
+  source?: { kind: 'hindsight'; bankId: string; readOnly: boolean }
 }
 
 interface KnowledgeFolder {
@@ -82,11 +94,15 @@ interface KnowledgePage {
   markdown: string
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store' })
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, cache: 'no-store' })
   const body = await response.json().catch(() => ({})) as Record<string, unknown>
   if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${String(response.status)}`)
   return body as T
+}
+
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
 function formatNumber(value: number): string {
@@ -116,30 +132,112 @@ export function KnowledgeHubApp({ t }: { t: AppFrameProps['t'] }) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [pageLoading, setPageLoading] = useState(false)
+  const [daemon, setDaemon] = useState<KnowledgeLifecycleStatus | null>(null)
+  const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const startLock = useRef(false)
+  const statusLock = useRef(false)
+  const snapshotLock = useRef(false)
 
   const labels = useMemo<MarkdownLabels>(() => ({
     code: { copyLabel: t('copy'), copiedLabel: t('copied') },
     footnotes: t('markdown.footnotes'),
   }), [t])
 
-  const loadSnapshot = useCallback(async () => {
+  const loadSnapshot = useCallback(async (): Promise<void> => {
+    if (snapshotLock.current) return
+    snapshotLock.current = true
     setLoading(true)
-    setError(null)
     try {
       const next = await fetchJson<KnowledgeSnapshot>('/api/knowledge/snapshot')
       setSnapshot(next)
+      setDaemon(current => current === null
+        ? { status: next.source.status, errorCode: null, message: null, startedAt: null, source: next.source }
+        : { ...current, status: next.source.status, source: next.source })
+      setError(null)
       setSelectedId(current => current !== null && next.pages.some(page => page.id === current)
         ? current
         : next.pages[0]?.id ?? null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setSnapshot(null)
+      setSelectedId(null)
+      setError(errorText(cause))
     } finally {
+      snapshotLock.current = false
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { void loadSnapshot() }, [loadSnapshot])
+  const refreshStatus = useCallback(async (): Promise<KnowledgeLifecycleStatus | null> => {
+    if (statusLock.current) return null
+    statusLock.current = true
+    setLoading(true)
+    try {
+      const next = await fetchJson<KnowledgeLifecycleStatus>('/api/knowledge/status')
+      setDaemon(next)
+      if (next.status === 'online') {
+        await loadSnapshot()
+      } else if (next.status === 'error') {
+        setSnapshot(null)
+        setSelectedId(null)
+        setError(null)
+      } else if (next.status === 'offline') {
+        setSnapshot(null)
+        setSelectedId(null)
+        setError(null)
+      } else {
+        setError(null)
+      }
+      return next
+    } catch (cause) {
+      setDaemon(null)
+      setSnapshot(null)
+      setSelectedId(null)
+      setError(errorText(cause))
+      return null
+    } finally {
+      statusLock.current = false
+      setLoading(false)
+    }
+  }, [loadSnapshot, t])
+
+  useEffect(() => { void refreshStatus() }, [refreshStatus])
+
+  useEffect(() => {
+    if (daemon?.status !== 'starting') return
+    let active = true
+    const timer = window.setInterval(() => {
+      if (active) void refreshStatus()
+    }, 1_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [daemon?.status, refreshStatus])
+
+  const startDaemon = useCallback(async () => {
+    if (startLock.current || starting || daemon?.status === 'starting' || daemon?.status === 'online') return
+    startLock.current = true
+    setStarting(true)
+    setError(null)
+    try {
+      const next = await fetchJson<KnowledgeLifecycleStatus>('/api/knowledge/start', { method: 'POST' })
+      setDaemon(next)
+      if (next.status === 'online') await loadSnapshot()
+      else if (next.status === 'error') setError(next.message ?? t('knowledge.start.failed'))
+      else if (next.status === 'offline') setError(t('knowledge.start.failed'))
+    } catch (cause) {
+      setError(errorText(cause))
+      await refreshStatus()
+    } finally {
+      startLock.current = false
+      setStarting(false)
+    }
+  }, [daemon?.status, loadSnapshot, refreshStatus, starting, t])
+
+  const retry = useCallback(() => {
+    void refreshStatus()
+  }, [refreshStatus])
 
   useEffect(() => {
     if (selectedId === null) {
@@ -168,6 +266,23 @@ export function KnowledgeHubApp({ t }: { t: AppFrameProps['t'] }) {
 
   const selectedSummary = snapshot?.pages.find(page => page.id === selectedId)
   const generated = selectedPage?.body.trim() !== 'Generating content...'
+  const daemonStatus = daemon?.status ?? 'offline'
+  const daemonTitle = daemonStatus === 'online'
+    ? t('knowledge.daemon.online')
+    : daemonStatus === 'starting'
+      ? t('knowledge.daemon.starting')
+      : daemonStatus === 'error'
+        ? t('knowledge.daemon.error')
+        : t('knowledge.daemon.offline')
+  const daemonDetail = daemonStatus === 'online'
+    ? t('knowledge.daemon.online.detail')
+    : daemonStatus === 'starting'
+      ? t('knowledge.daemon.starting.detail')
+      : daemonStatus === 'error'
+        ? t('knowledge.daemon.error.detail')
+        : t('knowledge.daemon.offline.detail')
+  const canStart = daemonStatus === 'offline' || daemonStatus === 'error'
+  const statusMessage = daemon?.message
 
   return (
     <section className={css.pane} role="region" aria-label={t('nav.knowledge')}>
@@ -180,29 +295,53 @@ export function KnowledgeHubApp({ t }: { t: AppFrameProps['t'] }) {
             <p className={css.subtitle}>{t('knowledge.subtitle')}</p>
           </div>
           <div className={css.sourceBlock}>
-            <span className={css.sourceState} data-state={snapshot?.source.status ?? 'offline'}>
+            <span className={css.sourceState} data-state={daemonStatus}>
               <span className={css.sourceDot} />
-              {snapshot?.source.status === 'online' ? t('knowledge.source.online') : t('knowledge.source.offline')}
+              {daemonStatus === 'online' ? t('knowledge.source.online') : t('knowledge.source.offline')}
             </span>
-            <span className={css.bankName}>{snapshot?.source.bankId ?? t('knowledge.source.unavailable')}</span>
+            <span className={css.bankName}>{daemon?.source?.bankId ?? snapshot?.source.bankId ?? t('knowledge.source.unavailable')}</span>
           </div>
           <button
             type="button"
             className={css.iconButton}
             aria-label={t('knowledge.refresh')}
             title={t('knowledge.refresh')}
-            disabled={loading}
-            onClick={() => { void loadSnapshot() }}
+            disabled={loading || starting}
+            onClick={retry}
           >
             {loading ? <IconLoadingOutline16 size={16} /> : <IconRefreshOutline16 size={16} />}
           </button>
         </header>
 
+        <section className={css.daemonPanel} data-state={daemonStatus} aria-live="polite" aria-label={t('knowledge.daemon.diagnostic')}>
+          <div className={css.daemonStatus}>
+            <span className={css.daemonDot} aria-hidden="true" />
+            <div className={css.daemonCopy}>
+              <strong>{daemonTitle}</strong>
+              <span>{daemonDetail}</span>
+              {statusMessage !== null && statusMessage !== undefined && (
+                <pre className={css.daemonDiagnostic}>{statusMessage}</pre>
+              )}
+            </div>
+          </div>
+          {canStart && (
+            <Button
+              size="sm"
+              variant={daemonStatus === 'error' ? 'outline' : 'primary'}
+              icon={starting ? <IconLoadingOutline16 size={16} /> : <IconPlayOutline16 size={16} />}
+              disabled={starting || loading}
+              onClick={() => { void startDaemon() }}
+            >
+              {starting ? t('knowledge.daemon.startingAction') : daemonStatus === 'error' ? t('knowledge.daemon.retry') : t('knowledge.daemon.start')}
+            </Button>
+          )}
+        </section>
+
         {error !== null && (
           <div className={css.errorBar} role="alert">
             <IconWarningOutline16 size={16} />
             <span>{t('knowledge.error')}: {error}</span>
-            <button type="button" onClick={() => { void loadSnapshot() }}>{t('retry')}</button>
+            <button type="button" onClick={retry}>{t('retry')}</button>
           </div>
         )}
 

@@ -1,16 +1,17 @@
 /** Session commands whose activation policy is explicit at each Remote method. */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Agent, ModelSelection as AgentModelSelection } from '@deepseek-ai/dsh-agent'
-import { AttachmentError, admitPromptContent } from '@deepseek-ai/dsh-attachment'
-import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { formatFileMention } from '@deepseek-ai/dsh-file-reference'
+import { AttachmentError } from '@deepseek-ai/dsh-attachment'
+import type {
+  AttachmentAdmissionPart, FileAttachmentRef, ImageAttachmentRef,
+} from '@deepseek-ai/dsh-attachment'
+import type { FileUploadReceiptId } from '@deepseek-ai/dsh-client-file-upload/types'
+import type {} from '@deepseek-ai/dsh-client-file-upload'
 import {
-  ReasoningEffortId, createUserMessage, freezeMessage,
+  ReasoningEffortId, assistantStreamChunks, createUserMessage, freezeMessage,
 } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
@@ -18,6 +19,7 @@ import type { SessionEvent, SessionHeader, SessionId, UserMessage } from '@deeps
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
@@ -31,7 +33,8 @@ import {
   inspectApiSession,
 } from './agent.ts'
 import type {
-  PromptContentPart,
+  ModelEnvironmentPlan,
+  ModelSelection,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -43,23 +46,29 @@ import type {
   SessionPromptRequest,
   SessionPromptValue,
   SessionRenameRequest,
+  ModelRoles,
   SessionRenameValue,
   SessionSelectModelRequest,
+  SessionSelectModelRolesRequest,
+  SessionSelectModelRolesValue,
   SessionSelectModelValue,
   SessionUpdateQueueRequest,
   SessionUpdateQueueValue,
-} from './types.ts'
-import {
-  DEFAULT_MAX_FILE_BYTES,
-  DEFAULT_MAX_FILES_PER_MESSAGE,
-  DEFAULT_MAX_MESSAGE_FILE_BYTES,
-  PROMPT_FILE_UPLOAD_DIR,
+  SessionRequestId,
 } from './types.ts'
 
 interface SessionReadState {
   readonly id: SessionId
   readonly header: SessionHeader
   readonly events: readonly SessionEvent[]
+}
+
+type PromptContentCandidate =
+  | SessionPromptRequest['content'][number]
+  | Extract<SessionUpdateQueueRequest['action'], { readonly kind: 'edit' }>['content'][number]
+
+function hasPromptContent(content: readonly PromptContentCandidate[]): boolean {
+  return content.some(part => part.type !== 'text' || part.text.trim().length > 0)
 }
 
 /** Implements Session business commands delegated by the Session Controller Remote service. */
@@ -144,6 +153,18 @@ export class SessionCommandController {
             ? {}
             : { reasoningEffort: resolved.reasoningEffort }),
         }
+        const preset = this.agents.presetForSession(agent.session)
+          ?? this.ctx.get('agentPresets')?.defaultId
+          ?? 'default'
+        const environment = await this.agents.resolveEnvironmentPlan(
+          selected.provider,
+          selected.model,
+          preset,
+        )
+        if (environment !== undefined) {
+          this.assertEnvironmentCompatible(agent, environment)
+          this.agents.selectEnvironmentForNextRequest(agent, environment)
+        }
         this.agents.selectForNextRequest(agent, selected)
         try {
           await this.ctx.agentDefaultModel.saveSelection(selected)
@@ -162,6 +183,118 @@ export class SessionCommandController {
         )
       }
     })
+  }
+
+  /**
+   * Validate and install complete thinking/worker roles for one Session.
+   * Both routes are resolved independently before any durable mutation. When
+   * disabled, the roles event is retained but ordinary model selection remains
+   * untouched so the pre-existing single-model path is unchanged.
+   * @param request - Session identity, enable flag, and two exact routes.
+   * @returns normalized role routes accepted by the Host.
+   */
+  async selectModelRoles(request: SessionSelectModelRolesRequest): Promise<SessionSelectModelRolesValue> {
+    const agent = await this.resolveAgent(request.sessionId)
+    return this.agents.serializeImageAdmission(agent, async () => {
+      try {
+        const normalize = async (selection: ModelRoles['thinking']): Promise<AgentModelSelection> => {
+          const resolved = await this.ctx.llm.resolveCallConfig({
+            provider: selection.provider,
+            model: selection.model,
+            ...(selection.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: ReasoningEffortId(selection.reasoningEffort) }),
+          })
+          return {
+            provider: resolved.provider,
+            model: resolved.model,
+            ...(resolved.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: resolved.reasoningEffort }),
+          }
+        }
+        const thinking = await normalize(request.thinking)
+        const worker = await normalize(request.worker)
+        const preset = this.agents.presetForSession(agent.session)
+          ?? this.ctx.get('agentPresets')?.defaultId
+          ?? 'default'
+        const thinkingEnvironment = await this.agents.resolveEnvironmentPlan(
+          thinking.provider,
+          thinking.model,
+          preset,
+        )
+        const workerEnvironment = await this.agents.resolveEnvironmentPlan(
+          worker.provider,
+          worker.model,
+          preset,
+        )
+        if (thinkingEnvironment !== undefined) this.assertEnvironmentCompatible(agent, thinkingEnvironment)
+        if (workerEnvironment !== undefined) this.assertEnvironmentCompatible(agent, workerEnvironment)
+        if (thinkingEnvironment !== undefined && workerEnvironment !== undefined
+          && !sameEnvironment(thinkingEnvironment, workerEnvironment)) {
+          throw new RemoteError(
+            'session/environment-conflict',
+            `thinking and worker model environments for session "${agent.session.id}" are incompatible`,
+            {
+              sessionId: agent.session.id,
+              currentProtocol: thinkingEnvironment.protocol,
+              nextProtocol: workerEnvironment.protocol,
+              currentState: thinkingEnvironment.state,
+              nextState: workerEnvironment.state,
+            },
+          )
+        }
+        const roles: ModelRoles = {
+          enabled: request.enabled,
+          thinking: serializeSelection(thinking),
+          worker: serializeSelection(worker),
+        }
+        agent.session.append('model/roles', roles)
+        // Disabling roles is intentionally a role-only mutation: the existing
+        // model-selection and environment projections remain authoritative.
+        if (request.enabled && workerEnvironment !== undefined) {
+          this.agents.selectEnvironmentForNextRequest(agent, workerEnvironment)
+        }
+        return { roles }
+      } catch (error) {
+        if (remoteErrorOf(error) !== undefined) throw error
+        throw new RemoteError(
+          'session/model-unavailable',
+          error instanceof Error ? error.message : String(error),
+          { provider: request.worker.provider, model: request.worker.model },
+        )
+      }
+    })
+  }
+
+  /**
+   * Guard model-visible history against environment changes it cannot replay.
+   * Once a request header exists, `state`, `compaction`, and `background` must
+   * stay identical. `protocol` is a per-request wire encoding over the
+   * canonical client-held history — adapters re-encode at call time — so a
+   * mid-session protocol crossing is safe whenever both plans replay
+   * client-side (`client-replay`); provider-managed routes keep the strict
+   * same-protocol requirement.
+   */
+  private assertEnvironmentCompatible(agent: Agent, next: ModelEnvironmentPlan): void {
+    if (agent.session.requestHeader() === undefined) return
+    const current = this.agents.environmentForSession(agent.session)
+    if (current === undefined) return
+    if (current.state === next.state
+      && current.compaction === next.compaction
+      && current.background === next.background
+      && (current.state === 'client-replay' || current.protocol === next.protocol)) return
+    throw new RemoteError(
+      'session/environment-conflict',
+      `model environment for session "${agent.session.id}" is incompatible with its existing history`,
+      {
+        sessionId: agent.session.id,
+        currentProtocol: current.protocol,
+        nextProtocol: next.protocol,
+        currentState: current.state,
+        nextState: next.state,
+      },
+    )
   }
 
   /**
@@ -291,11 +424,18 @@ export class SessionCommandController {
   }
 
   /**
-   * Admit one browser prompt after explicit Agent resume and image validation.
+   * Reject empty content, then admit one prompt after Agent and attachment validation.
    * @param request - Session identity, prompt content, source metadata, and delivery mode.
    * @returns acknowledgement that the Agent accepted the prompt.
    */
   async prompt(request: SessionPromptRequest): Promise<SessionPromptValue> {
+    if (!hasPromptContent(request.content)) {
+      throw new RemoteError(
+        'gateway/bad-request',
+        'prompt content must include non-whitespace text or an attachment',
+        {},
+      )
+    }
     const clientTimeZone = request.clientTimeZone === undefined
       ? undefined
       : canonicalClientTimeZone(request.clientTimeZone)
@@ -307,6 +447,7 @@ export class SessionCommandController {
       )
     }
     const agent = await this.resolveAgent(request.sessionId)
+    if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
     const selection = this.agents.selectionFor(agent).current
     if (!routeServed(this.ctx, selection.provider)) {
       throw new RemoteError(
@@ -321,7 +462,6 @@ export class SessionCommandController {
       ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
     }
     const hasImage = request.content.some(part => part.type === 'image')
-    const hasFile = request.content.some(part => part.type === 'file')
     const admit = async (): Promise<SessionPromptValue> => {
       try {
         if (hasImage) {
@@ -335,23 +475,23 @@ export class SessionCommandController {
             )
           }
         }
-        // File uploads land in the Session workspace before admission: each
-        // part becomes an `@path` workspace reference text part, so the
-        // durable message carries the mention and the bytes stay readable by
-        // the filesystem tools. Image parts then ride the attachment admission.
-        const importable = hasFile
-          ? await this.importPromptFiles(agent, request.content)
-          : request.content
-        // importPromptFiles folds every file part into an @path text part (and
-        // the no-file branch carries none), so the wider local union narrows
-        // safely to the attachment admission vocabulary.
-        const content = await admitPromptContent(
-          this.ctx.attachments,
-          importable as readonly import('@deepseek-ai/dsh-attachment').PromptContentPart[],
+        const admission = resolvePromptFileReceipts(
+          request.content,
+          receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
         )
+        const content = await this.ctx.attachments.admitPromptContent(admission.content)
         const message: UserMessage = createUserMessage({ content, source })
+        if (this.ctx.agents.get(agent.id) !== agent) {
+          throw new RemoteError(
+            'session/not-found',
+            `session "${agent.id}" was disposed during prompt admission`,
+            { sessionId: agent.id },
+          )
+        }
+        using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
         if (request.mode === 'steer') agent.steer(message)
         else agent.followup(message)
+        binding.commit()
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error
         if (error instanceof AttachmentError) {
@@ -362,94 +502,6 @@ export class SessionCommandController {
       return { accepted: true }
     }
     return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
-  }
-
-  /** Serializes prompt-file writes so concurrent prompts never race one upload name. */
-  private fileImportChain: Promise<unknown> = Promise.resolve()
-
-  /**
-   * Write every file upload in one prompt into the Session workspace's upload
-   * directory and replace each part with an `@path` workspace-reference text
-   * part. Non-file parts pass through unchanged, preserving order.
-   * @param agent - Session Agent whose workspace receives the uploads.
-   * @param content - prompt content including zero or more file parts.
-   * @returns content with every file part replaced by its workspace mention.
-   */
-  private importPromptFiles(
-    agent: Agent,
-    content: readonly PromptContentPart[],
-  ): Promise<readonly PromptContentPart[]> {
-    const run = async (): Promise<readonly PromptContentPart[]> => {
-      const files = content.filter(part => part.type === 'file')
-      if (files.length > DEFAULT_MAX_FILES_PER_MESSAGE) {
-        throw new AttachmentError(
-          `a message can include at most ${String(DEFAULT_MAX_FILES_PER_MESSAGE)} files`,
-          'TOO_MANY_FILES',
-        )
-      }
-      let total = 0
-      const decoded = files.map((part) => {
-        const bytes = decodeUpload(part.data)
-        total += bytes.byteLength
-        if (bytes.byteLength > DEFAULT_MAX_FILE_BYTES) {
-          throw new AttachmentError(
-            `file "${part.name}" exceeds the ${String(DEFAULT_MAX_FILE_BYTES)}-byte limit`,
-            'FILE_TOO_LARGE',
-          )
-        }
-        return bytes
-      })
-      if (total > DEFAULT_MAX_MESSAGE_FILE_BYTES) {
-        throw new AttachmentError(
-          `file uploads exceed the ${String(DEFAULT_MAX_MESSAGE_FILE_BYTES)}-byte message limit`,
-          'FILES_TOO_LARGE',
-        )
-      }
-      const cwd = agent.session.header.cwd ?? this.defaultCwd
-      const uploadDir = join(cwd, PROMPT_FILE_UPLOAD_DIR)
-      try {
-        await mkdir(uploadDir, { recursive: true })
-        await writeFile(
-          join(uploadDir, '.gitignore'),
-          '*\n',
-          { flag: 'wx' },
-        ).catch(() => undefined) // an existing .gitignore is left untouched
-      } catch (error) {
-        throw new AttachmentError(
-          'unable to prepare the workspace upload directory',
-          'FILE_IMPORT_FAILED',
-          { cause: error },
-        )
-      }
-      let nextFile = 0
-      const imported: PromptContentPart[] = []
-      for (const part of content) {
-        if (part.type !== 'file') {
-          imported.push(part)
-          continue
-        }
-        const bytes = decoded[nextFile]
-        nextFile += 1
-        if (bytes === undefined) continue
-        const target = await uniqueUploadPath(uploadDir, sanitizeUploadName(part.name))
-        try {
-          await writeFile(target, bytes)
-        } catch (error) {
-          throw new AttachmentError(
-            `unable to save file "${part.name}" into the workspace`,
-            'FILE_IMPORT_FAILED',
-            { cause: error },
-          )
-        }
-        const relative = `${PROMPT_FILE_UPLOAD_DIR}/${baseNameOf(target)}`
-        const mention = formatFileMention({ path: relative, kind: 'file' }, false)
-        imported.push({ type: 'text', text: mention ?? `@${relative}` })
-      }
-      return imported
-    }
-    const chained = this.fileImportChain.then(run, run)
-    this.fileImportChain = chained.catch(() => undefined)
-    return chained
   }
 
   /**
@@ -499,20 +551,34 @@ export class SessionCommandController {
    * @returns acknowledgement that the queue mutation was applied.
    */
   updateQueue(request: SessionUpdateQueueRequest): SessionUpdateQueueValue {
-    if (request.action.kind === 'edit'
-      && request.action.content.some(block => block.type !== 'text')) {
-      throw new RemoteError(
-        'session/attachment-invalid',
-        'queue edits accept text content only',
-        { reason: 'QUEUE_EDIT_NON_TEXT' },
-      )
+    if (request.action.kind === 'edit') {
+      if (request.action.content.some(block => block.type !== 'text')) {
+        throw new RemoteError(
+          'session/attachment-invalid',
+          'queue edits accept text content only',
+          { reason: 'QUEUE_EDIT_NON_TEXT' },
+        )
+      }
+      if (!hasPromptContent(request.action.content)) {
+        throw new RemoteError(
+          'gateway/bad-request',
+          'queue edit content must include non-whitespace text',
+          {},
+        )
+      }
     }
     const agent = this.ctx.agents.get(request.sessionId)
-    if (agent !== undefined && hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
-      throw apiSessionSubagentOwnershipError(request.sessionId)
-    }
     if (agent === undefined) {
       throw new RemoteError('session/queue-item-not-found', 'queued item is no longer pending', { itemId: request.itemId })
+    }
+    if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
+      const identity = this.ctx.sessionProjections
+        .snapshot(agent.session, ['subagent'])
+        .values.subagent
+      if (identity?.mode !== 'continuable'
+        || !agent.session.isOwnSeq(identity.seq)) {
+        throw apiSessionSubagentOwnershipError(request.sessionId)
+      }
     }
     const nextTurn = agent.inbox.nextTurn.find(message => message.id === request.itemId)
     const nextStep = agent.inbox.nextStep.find(message => message.id === request.itemId)
@@ -526,14 +592,28 @@ export class SessionCommandController {
     if (request.action.kind === 'steer' && (target !== 'next-turn' || agent.status !== 'running')) {
       throw new RemoteError('session/steer-unavailable', 'current turn no longer accepts steering', { itemId: request.itemId })
     }
-    if (request.action.kind === 'edit') {
-      agent.inbox.replace(request.itemId, freezeMessage<UserMessage>({
-        ...message,
-        content: [...request.action.content],
-      }))
-    } else {
-      agent.inbox.remove(request.itemId)
-      if (request.action.kind === 'steer') agent.steer(message)
+    switch (request.action.kind) {
+      case 'edit':
+        agent.inbox.replace(request.itemId, freezeMessage<UserMessage>({
+          ...message,
+          content: [...request.action.content],
+        }))
+        break
+      case 'remove': {
+        agent.inbox.remove(request.itemId)
+        const source = message.source
+        if (source.kind === 'user' && 'rpcId' in source) {
+          this.ctx.fileUploads.retirePrompt(agent, source.rpcId)
+        }
+        break
+      }
+      case 'steer':
+        agent.inbox.remove(request.itemId)
+        agent.steer(message)
+        break
+      /* v8 ignore next 2 -- closed-union exhaustiveness guard */
+      default:
+        assertNever(request.action, 'queue action')
     }
     return { accepted: true }
   }
@@ -609,6 +689,39 @@ export class SessionCommandController {
   }
 }
 
+function resolvePromptFileReceipts(
+  content: SessionPromptRequest['content'],
+  stagedFile: (receiptId: FileUploadReceiptId) => FileAttachmentRef | undefined,
+): { readonly content: AttachmentAdmissionPart[]; readonly receiptIds: readonly FileUploadReceiptId[] } {
+  const receiptIds = new Set<FileUploadReceiptId>()
+  const resolved = content.map((part): AttachmentAdmissionPart => {
+    if (part.type !== 'file') return part
+    const attachment = stagedFile(part.receiptId)
+    if (attachment === undefined) {
+      throw new RemoteError(
+        'session/attachment-invalid',
+        'File was not uploaded for this session.',
+        { reason: 'FILE_NOT_STAGED' },
+      )
+    }
+    receiptIds.add(part.receiptId)
+    return { type: 'file', attachment }
+  })
+  return { content: resolved, receiptIds: [...receiptIds] }
+}
+
+function hasPromptRequest(agent: Agent, requestId: SessionRequestId): boolean {
+  const matches = (message: UserMessage): boolean => {
+    const source = message.source
+    return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
+  }
+  if (agent.inbox.nextTurn.some(matches) || agent.inbox.nextStep.some(matches)) return true
+  return agent.session.snapshotEvents().some((event) => {
+    if (event.type !== 'user/message') return false
+    const source = event.data.source
+    return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
+  })
+}
 function imageBlockIn(
   content: unknown,
   match: (ref: ImageAttachmentRef) => boolean,
@@ -637,7 +750,6 @@ function imageInEvent(
     readonly content?: unknown
     readonly message?: { readonly content?: unknown }
     readonly inserted?: readonly { readonly content?: unknown }[]
-    readonly chunk?: { readonly type?: unknown; readonly block?: unknown }
   }
   const direct = imageBlockIn(data.content, match)
   if (direct !== undefined) return direct
@@ -647,9 +759,13 @@ function imageInEvent(
     const found = imageBlockIn(inserted.content, match)
     if (found !== undefined) return found
   }
-  return event.type === 'assistant/chunk' && data.chunk?.type === 'block-end'
-    ? imageBlockIn([data.chunk.block], match)
-    : undefined
+  if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
+    for (const chunk of assistantStreamChunks(event.data.stream, 'block-end')) {
+      const found = imageBlockIn([chunk.block], match)
+      if (found !== undefined) return found
+    }
+  }
+  return undefined
 }
 
 function referencedImage(
@@ -667,42 +783,26 @@ function routeServed(ctx: Context, provider: string): boolean {
   return ctx.llm.listProviders().some(entry => entry.id === provider)
 }
 
-/** Decode one canonical base64 upload, rejecting non-canonical forms. */
-function decodeUpload(data: string): Uint8Array {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(data) || data.length % 4 !== 0) {
-    throw new AttachmentError('file upload is not canonical base64', 'FILE_IMPORT_FAILED')
-  }
-  return Buffer.from(data, 'base64')
-}
-
-/** Reduce a browser file name to a safe single path segment. */
-function sanitizeUploadName(raw: string): string {
-  const segment = basename(raw.split(/[\\/]/u).pop() ?? '')
-    .replace(/[\u0000-\u001f\u007f"]/gu, '')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, 128)
-  if (segment === '' || segment === '.' || segment === '..') return 'uploaded-file'
-  return segment
-}
-
-/** Pick a not-yet-existing destination for one upload name in a directory. */
-async function uniqueUploadPath(dir: string, name: string): Promise<string> {
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const suffix = dot > 0 ? name.slice(dot) : ''
-  let candidate = name
-  for (let index = 1; ; index += 1) {
-    try {
-      await stat(join(dir, candidate))
-    } catch {
-      return join(dir, candidate)
-    }
-    candidate = `${stem}-${String(index)}${suffix}`
+function serializeSelection(selection: AgentModelSelection): ModelSelection {
+  return {
+    provider: selection.provider,
+    model: selection.model,
+    ...(selection.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: String(selection.reasoningEffort) }),
   }
 }
 
-/** Final path segment of one written upload destination. */
-function baseNameOf(target: string): string {
-  return basename(target)
+/**
+ * Test whether the two role routes can share one Session history. Protocol is
+ * a per-request wire encoding over the canonical client-held history —
+ * adapters re-encode at call time — so a protocol crossing is safe whenever
+ * both plans replay client-side; provider-managed routes keep the strict
+ * same-protocol requirement, mirroring {@link SessionCommandController.assertEnvironmentCompatible}.
+ */
+function sameEnvironment(left: ModelEnvironmentPlan, right: ModelEnvironmentPlan): boolean {
+  return left.state === right.state
+    && left.compaction === right.compaction
+    && left.background === right.background
+    && (left.state === 'client-replay' || left.protocol === right.protocol)
 }

@@ -107,7 +107,6 @@ export class AgentSlotDriver implements BenchSlotDriver {
   /** Create (or reuse) the live agent for one slot with its working dir. */
   async ensureSlot(slot: string, cwd: string): Promise<void> {
     if (this.slots.has(slot)) return
-    const driver = this
     // The same model-selection coupling the session/headless entry points use:
     // prompt assembly snapshots `current`, and agent/request applies it, so a
     // slot without an explicit route still resolves the deployment default.
@@ -117,9 +116,9 @@ export class AgentSlotDriver implements BenchSlotDriver {
       meta: { cwd },
       setup: async (agentCtx: unknown) => {
         installModelSelection(agentCtx as never, modelRef)
-        if (driver.presets !== undefined) {
-          const resolved = await driver.presets.resolve(undefined)
-          await driver.presets.mount(agentCtx, resolved.id)
+        if (this.presets !== undefined) {
+          const resolved = await this.presets.resolve(undefined)
+          await this.presets.mount(agentCtx, resolved.id)
         }
       },
     })
@@ -138,7 +137,7 @@ export class AgentSlotDriver implements BenchSlotDriver {
     signal.throwIfAborted()
     // Refresh the live selection so the next prompt assembly snapshots it.
     entry.modelRef.current = this.resolveSelection(slot)
-    const before = entry.agent.session.events.length
+    const before = entry.agent.session.seq
     const onAbort = (): void => {
       entry.agent.cancel({ kind: 'user' }, { keepInbox: true })
     }
@@ -150,7 +149,7 @@ export class AgentSlotDriver implements BenchSlotDriver {
       signal.removeEventListener('abort', onAbort)
     }
     if (signal.aborted) throw new BenchAbortedError()
-    return extractReplyText(entry.agent.session.events, before)
+    return extractReplyText(entry.agent.session.snapshotEvents(before), 0)
   }
 
   /** Dispose every live slot agent, containing individual failures. */

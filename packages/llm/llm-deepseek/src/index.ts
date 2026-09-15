@@ -91,6 +91,15 @@ const PROVIDER = 'deepseek-official'
 
 const DEFAULT_MODELS: DeepSeekCatalogModel[] = [
   {
+    id: 'deepseek-flash',
+    name: 'DeepSeek-V41-Flash',
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
+    inputModalities: ['text', 'image'],
+    imagePixelBudget: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
+    imageMaxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
+    systemPromptUpdate: 'in-history',
+  },
+  {
     id: 'deepseek-v4-flash',
     name: 'DeepSeek-V4-Flash',
     description: 'Fast, efficient, and economical; suited to focused, routine, or parallel tasks.',
@@ -133,9 +142,16 @@ export interface Config {
   reasoningEffort?: 'off' | 'low' | 'high' | 'max'
   /** Default per-request output cap (default 256,000); a model's own cap and explicit request values win. */
   maxTokens?: number
+  /**
+   * Repetition penalty sampled on every conversation request (default unset =
+   * the provider's own 1, no penalty). Counters degenerate repetition loops on
+   * long sessions; values above 1 penalize repeated tokens, and the provider
+   * accepts (0, 2).
+   */
+  repetitionPenalty?: number
   /** Positive context capacity used when the selected model has no exact value (default 1,000,000). */
   defaultContextWindow?: number
-  /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
+  /** Advisory models shown by discovery consumers; defaults to V41 Flash, V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
   models?: DeepSeekCatalogModel[]
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
@@ -172,6 +188,7 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
   inputModalities: z.array(z.union(MODEL_MODALITIES)).min(1).default(['text']),
   imagePixelBudget: z.union([z.number().step(1).min(1), 'low']),
   imageMaxBytes: z.number().step(1).min(1),
+  systemPromptUpdate: z.const('in-history'),
 })
 
 export const Config: z<Config> = z.object({
@@ -180,6 +197,7 @@ export const Config: z<Config> = z.object({
   thinking: z.union(['enabled', 'disabled']),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']),
   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOKENS),
+  repetitionPenalty: z.number().min(0).max(2),
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
   models: z.array(catalogModel).default(DEFAULT_MODELS),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -258,6 +276,11 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
       && (!Number.isSafeInteger(model.imageMaxBytes) || model.imageMaxBytes <= 0)) {
       throw new Error(`llm-deepseek: catalog model "${model.id}" imageMaxBytes must be a positive safe integer`)
     }
+    // Widened: a dynamic config update reaches this check without schema validation.
+    const systemPromptUpdate: string | undefined = model.systemPromptUpdate
+    if (systemPromptUpdate !== undefined && systemPromptUpdate !== 'in-history') {
+      throw new Error(`llm-deepseek: catalog model "${model.id}" systemPromptUpdate must be "in-history" when present`)
+    }
     if (seen.has(model.id)) throw new Error(`llm-deepseek: duplicate catalog model "${model.id}"`)
     seen.add(model.id)
     return {
@@ -266,6 +289,7 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
       ...model.description === undefined ? {} : { description: model.description },
       ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
       ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
+      ...model.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: model.systemPromptUpdate },
       inputModalities: [...inputModalities],
       ...hasImage
         ? {
@@ -381,6 +405,7 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
     defaults: {
       thinking: config.thinking,
       reasoningEffort: config.reasoningEffort,
+      repetitionPenalty: config.repetitionPenalty,
     },
     maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
     defaultContextWindow: config.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,

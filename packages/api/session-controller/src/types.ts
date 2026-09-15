@@ -4,10 +4,9 @@ import type {
   AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
 } from '@deepseek-ai/dsh-attachment'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
-import type { ChunkRow } from '@deepseek-ai/dsh-session/chunk-rows'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { LlmAttemptId, MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { JobId } from '@deepseek-ai/dsh-jobs/brand'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -21,6 +20,10 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
     imageLimits: null
     /** Durable model selection already used by a request and still pending for a later request. */
     modelSelection: ModelSelectionProjectionState
+    /** Durable model environment selected for the next model-visible request. */
+    modelEnvironment: ModelEnvironmentPlan | null
+    /** Durable dual-model thinking/execution roles selected for this Session. */
+    modelRoles: ModelRoles | null
   }
   interface SessionProjectionMap {
     /** Persisted facts used to summarize a Session without activating it. */
@@ -29,6 +32,10 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
     imageLimits: ImageAttachmentLimits
     /** Durable model selection already used and selected for the next request. */
     modelSelection: ModelSelectionProjection
+    /** Selected model environment, or absent for sessions created before this projection. */
+    modelEnvironment: ModelEnvironmentPlan | null
+    /** Selected dual-model thinking/execution roles, or absent when never configured. */
+    modelRoles: ModelRoles | null
   }
 }
 
@@ -39,6 +46,16 @@ declare module '@deepseek-ai/dsh-session/types' {
      * assembly. Log-only: it never enters derived model history.
      */
     'model/selection': ModelSelection
+    /** Complete environment plan selected for subsequent model-visible requests. */
+    'model/environment': ModelEnvironmentPlan
+    /** Complete dual-model thinking/execution roles selected for subsequent turns. */
+    'model/roles': ModelRoles
+    /**
+     * One thinking-model planning call completed without producing a plan.
+     * Log-only: the turn continues with the worker alone, and this record
+     * preserves the reason for diagnostics.
+     */
+    'dual-model/plan-skipped': DualModelPlanSkippedEventData
   }
 }
 
@@ -68,7 +85,11 @@ export interface SessionProjectionBaseline {
 export type SessionProjectionValues = Partial<SessionProjectionMap>
   & Readonly<Record<string, SessionProjectionValue>>
 
-/** Browser-submitted prompt content; the Host promotes image bytes to durable references. */
+/**
+ * Browser-submitted prompt content; the Host promotes image bytes to durable
+ * references. File parts carry the opaque receipt returned by a preceding
+ * `uploadFile` call on the same Session.
+ */
 export type PromptContentPart =
   | { readonly type: 'text'; readonly text: string }
   | {
@@ -77,33 +98,46 @@ export type PromptContentPart =
     readonly data: string
     readonly name?: string
   }
-  | {
-    /**
-     * One arbitrary file upload: the Host writes the bytes into the Session
-     * workspace's `.dsh/uploads` directory and admits an `@path` workspace
-     * reference in the user message instead of model content.
-     */
-    readonly type: 'file'
-    /** Browser file name; the Host sanitizes it before writing. */
-    readonly name: string
-    /** Base64-encoded file bytes. */
-    readonly data: string
-  }
-
-/** Default maximum files accepted in one prompt. */
-export const DEFAULT_MAX_FILES_PER_MESSAGE = 20
-/** Default maximum decoded size of one uploaded file. */
-export const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
-/** Default maximum combined decoded size of one prompt's file uploads. */
-export const DEFAULT_MAX_MESSAGE_FILE_BYTES = 200 * 1024 * 1024
-/** Workspace-relative directory receiving prompt file uploads. */
-export const PROMPT_FILE_UPLOAD_DIR = '.dsh/uploads'
+  | { readonly type: 'file'; readonly receiptId: Branded<'file-upload-receipt-id'> }
 
 /** Complete model selection for one Session. */
 export interface ModelSelection {
   readonly provider: string
   readonly model: string
   readonly reasoningEffort?: string
+}
+
+/** Complete dual-model thinking/execution roles for one Session. */
+export interface ModelRoles {
+  /** Whether planning through the thinking model is enabled. */
+  readonly enabled: boolean
+  /** Exact route used to produce a plan at the start of each turn. */
+  readonly thinking: ModelSelection
+  /** Exact route used for ordinary worker requests. */
+  readonly worker: ModelSelection
+}
+
+/** Why one thinking-model planning call produced no plan. */
+export type DualModelPlanSkipReason =
+  | 'route-resolve-failed'
+  | 'call-failed'
+  | 'finish-not-usable'
+  | 'empty-output'
+
+/** Facts about one thinking-model planning call that produced no plan. */
+export interface DualModelPlanSkippedEventData {
+  /** Turn whose first step ran the planning call. */
+  readonly turn: number
+  /** Registered thinking route the call used. */
+  readonly thinking: ModelSelection
+  /** Structured failure classification. */
+  readonly reason: DualModelPlanSkipReason
+  /** Terminal finish kind when the model stream completed. */
+  readonly finish?: string
+  /** Error or finish detail; absent when nothing further is known. */
+  readonly detail?: string
+  /** Wall-clock duration of the planning attempt in milliseconds. */
+  readonly durationMs: number
 }
 
 /** Host fold state for durable model selection. */
@@ -135,12 +169,23 @@ export interface ModelReasoning {
   readonly defaultEffort?: string
 }
 
+/** Exact model execution metadata exposed to model-environment resolvers. */
+export interface ModelCapabilities {
+  readonly protocol: string
+  readonly state: 'client-replay' | 'provider-managed'
+  readonly promptCaching: 'none' | 'provider'
+  readonly nativeCompaction: boolean
+  readonly background: boolean
+  readonly parallelToolCalls: boolean
+}
+
 /** One model displayed inside its provider group. */
 export interface ModelCatalogModel {
   readonly id: string
   readonly name: string
   readonly description?: string
   readonly reasoning?: ModelReasoning
+  readonly capabilities?: ModelCapabilities
 }
 
 /** One provider and its successfully loaded model catalog. */
@@ -166,9 +211,91 @@ export interface ModelCatalog {
   readonly failures: readonly ModelCatalogFailure[]
 }
 
+/** Compaction strategy selected by a model environment plan. */
+export type ModelEnvironmentCompaction = 'basic' | 'native' | 'disabled'
+
+/** Background execution mode selected by a model environment plan. */
+export type ModelEnvironmentBackground = 'foreground' | 'durable'
+
+/** Task policy supplied to the model environment resolver. */
+export interface ModelEnvironmentPolicy {
+  /** Compaction strategy preferred by the task. */
+  readonly compaction: ModelEnvironmentCompaction
+  /** Background execution preferred by the task. */
+  readonly background: ModelEnvironmentBackground
+  /** Whether the task requires parallel-safe tool calls. */
+  readonly parallelToolCalls: boolean
+}
+
+/** Explicit environment overrides validated against exact route capabilities. */
+export interface ModelEnvironmentOverrides {
+  /** Exact adapter protocol required by the override. */
+  readonly protocol?: string
+  /** State strategy required by the override. */
+  readonly state?: 'client-replay' | 'provider-managed'
+  /** Compaction strategy required by the override. */
+  readonly compaction?: ModelEnvironmentCompaction
+  /** Background execution mode required by the override. */
+  readonly background?: ModelEnvironmentBackground
+  /** Whether parallel-safe tool calls are required by the override. */
+  readonly parallelToolCalls?: boolean
+}
+
+/** Reason for one resolved model environment field. */
+export interface ModelEnvironmentReason {
+  readonly field: string
+  readonly source: 'route' | 'preset' | 'task' | 'override' | 'fallback'
+  readonly code: string
+}
+
+/** Detached model execution plan returned by the environment resolver. */
+export interface ModelEnvironmentPlan {
+  readonly route: { readonly provider: string; readonly model: string }
+  readonly preset: string
+  readonly protocol: string
+  readonly state: 'client-replay' | 'provider-managed'
+  readonly promptCaching: 'none' | 'provider'
+  readonly compaction: ModelEnvironmentCompaction
+  readonly background: ModelEnvironmentBackground
+  readonly parallelToolCalls: boolean
+  readonly reasons: readonly ModelEnvironmentReason[]
+}
+
+/** Host request for a secret-free exact-route environment diagnostic. */
+export interface SessionModelEnvironmentRequest {
+  readonly provider: string
+  readonly model: string
+  readonly agentPreset?: string
+  readonly policy: ModelEnvironmentPolicy
+  readonly overrides?: ModelEnvironmentOverrides
+}
+
+/** Environment diagnostic returned for one exact route. */
+export interface SessionModelEnvironmentValue {
+  readonly plan: ModelEnvironmentPlan
+}
+
+/** Request to rewrite one draft with the currently selected model. */
+export interface PromptEnhancementRequest extends ModelSelection {
+  readonly sessionId: SessionId
+  /** Draft text to improve; the Host never persists this auxiliary request. */
+  readonly prompt: string
+  /** Whether to include a bounded, read-only workspace summary. */
+  readonly readProject: boolean
+}
+
+/** Enhanced draft returned by the selected model. */
+export interface PromptEnhancementValue {
+  readonly prompt: string
+}
+
 /** One client-requested mutation of a still-pending queue item. */
 export type QueueAction =
-  | { readonly kind: 'edit'; readonly content: readonly ContentBlock[] }
+  | {
+    readonly kind: 'edit'
+    /** Non-empty text-only replacement content. */
+    readonly content: readonly ContentBlock[]
+  }
   | { readonly kind: 'remove' }
   | { readonly kind: 'steer' }
 
@@ -222,7 +349,37 @@ export type SessionError = {
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
+    'model-environment/invalid-route': { readonly provider: string; readonly model: string }
+    'model-environment/route-unavailable': { readonly provider: string; readonly model: string }
+    'model-environment/preset-unavailable': {
+      readonly provider: string
+      readonly model: string
+      readonly preset: string
+    }
+    'model-environment/protocol-unavailable': {
+      readonly provider: string
+      readonly model: string
+      readonly requested: string
+    }
+    'model-environment/state-unavailable': {
+      readonly provider: string
+      readonly model: string
+      readonly requested: string
+    }
+    'model-environment/native-compaction-unavailable': { readonly provider: string; readonly model: string }
+    'model-environment/background-unavailable': { readonly provider: string; readonly model: string }
+    'model-environment/parallel-tool-calls-unavailable': { readonly provider: string; readonly model: string }
+    'session/environment-conflict': {
+      readonly sessionId: SessionId
+      readonly currentProtocol: string
+      readonly nextProtocol: string
+      readonly currentState: 'client-replay' | 'provider-managed'
+      readonly nextState: 'client-replay' | 'provider-managed'
+    }
     'session/model-unavailable': { readonly provider: string; readonly model: string }
+    'session/prompt-enhancement-invalid': { readonly reason: 'EMPTY_PROMPT' | 'PROMPT_TOO_LARGE' | 'STALE_MODEL' | 'INVALID_REQUEST' }
+    'session/prompt-enhancement-unavailable': { readonly reason: 'FILESYSTEM_UNAVAILABLE' | 'WORKSPACE_UNAVAILABLE' }
+    'session/prompt-enhancement-failed': { readonly reason: 'STREAM_FAILED' | 'MODEL_ERROR' | 'ABORTED' | 'MAX_TOKENS' | 'TOOL_CALLS' | 'NON_TEXT_OUTPUT' | 'EMPTY_OUTPUT' | 'OUTPUT_TOO_LARGE' }
     'session/conflict': {
       readonly sessionId: SessionId
       readonly requestedCwd: string
@@ -322,6 +479,19 @@ export interface SessionSelectModelValue {
   readonly selected: ModelSelection
 }
 
+/** Session dual-model role-selection request. */
+export interface SessionSelectModelRolesRequest {
+  readonly sessionId: SessionId
+  readonly enabled: boolean
+  readonly thinking: ModelSelection
+  readonly worker: ModelSelection
+}
+
+/** Accepted dual-model roles after Host route and environment validation. */
+export interface SessionSelectModelRolesValue {
+  readonly roles: ModelRoles
+}
+
 /** Session rename request. */
 export interface SessionRenameRequest {
   readonly sessionId: SessionId
@@ -351,6 +521,7 @@ export interface SessionPromptRequest {
   readonly requestId: SessionRequestId
   readonly sessionId: SessionId
   readonly mode: 'queue' | 'steer'
+  /** At least one non-whitespace text part or attachment. */
   readonly content: readonly PromptContentPart[]
   readonly clientTimeZone?: string
 }
@@ -492,6 +663,8 @@ export interface SessionTerminalCloseValue {
 
 /** Request to open one path prepared by a Session-aware caller on the Host desktop. */
 export interface SessionOpenWorkspacePathRequest {
+  /** File-manager navigation when requested; omission uses the default application. */
+  readonly action?: 'reveal'
   /** Path after best-effort Session workspace resolution, in Host filesystem syntax. */
   readonly path: string
 }
@@ -527,53 +700,43 @@ export interface SessionEventEntry {
   readonly event: SessionWireEvent
 }
 
-/** v0-compatible Session metadata carried on the browser wire. */
+/** Current logical Session metadata carried on the browser wire. */
 export interface SessionWireHeader {
   readonly version: number
   readonly id: SessionId
   readonly createdAt: number
   readonly cwd?: string
   readonly parentSession?: SessionId
-  /** Exact inherited prefix length; absent for an unseeded Session. */
-  readonly seedLength?: number
+  /** Whether the Session contains a fork-inherited prefix. */
+  readonly isSeeded: boolean
   readonly origin?: 'subagent'
   readonly delegationDepth?: number
   readonly agentPreset?: string
 }
 
-/** Browser wire form of one Session surface operation. */
+/** Browser wire surface operation; replacement endpoints are earlier event seqs in surface order. */
 export type SessionWireSurfaceOp =
   | 'append'
-  | { readonly op: 'replace'; readonly start: number; readonly end: number }
+  | { readonly op: 'replace'; readonly startSeq: number; readonly endSeq: number }
 
-/** Event-shaped wire representation of one packed chunk row. */
-export type ChunkRowEvent = {
-  [Kind in ChunkRow['type']]: {
-    readonly type: `chunkrow/${Kind}`
-    readonly seq: number
-    readonly time: number
-    readonly data: Extract<ChunkRow, { readonly type: Kind }>['data']
-  }
-}[ChunkRow['type']]
+/** One history-page record with compact Assistant streams embedded inside events. */
+export type SessionHistoryRecord = SessionEventEntry
 
-/** One lossless run of consecutive Assistant delta events in a history page. */
-export interface SessionChunkRun {
-  readonly type: 'chunks'
-  readonly event: ChunkRowEvent
-}
-
-/** One history-page record: a raw event or a packed Assistant delta run. */
-export type SessionHistoryRecord = SessionEventEntry | SessionChunkRun
-
-/** Session event wire form; durable readers own recognition of merge-extensible event names. */
+/**
+ * Exact Session event envelope accepted by the Client journal adapter.
+ * Surface events require surfaceOp; only non-Assistant surface events may cite earlier sources.
+ * Durable readers own recognition of merge-extensible event names.
+ */
 export interface SessionWireEvent {
   readonly type: string
   readonly seq: number
   readonly time: number
   readonly data: JsonValue
   readonly ignorable?: true
-  readonly sourceEventSeqs?: number[]
-  readonly surfaceOp?: SessionWireSurfaceOp
+  /** Earlier sources on current surface events; opaque JSON on unknown ignorable events. */
+  readonly sourceEventSeqs?: JsonValue
+  /** Canonical placement on current surface events; opaque JSON on unknown ignorable events. */
+  readonly surfaceOp?: JsonValue
 }
 
 /** One message-aligned backwards-history request. */
@@ -589,7 +752,61 @@ export interface SessionPageRequest {
 export interface SessionFollowRequest {
   readonly address: SessionAddress
   readonly maxMessages?: number
+  /** Include process-local assistant presentation frames for the Web client. */
+  readonly assistantStream?: true
 }
+
+/** One active assistant attempt in a reconnect opening snapshot. */
+export interface SessionAssistantStreamAttempt {
+  readonly attemptId: LlmAttemptId
+  /** Last durable Session seq observed when this attempt started. */
+  readonly startedAfterSeq: SessionSeqCursor
+  readonly turn: number
+  readonly step: number
+  /** Dense position expected for the next live chunk frame. */
+  readonly nextIndex: number
+  /** Compact detached stream accumulated at this opening revision. */
+  readonly stream: readonly JsonValue[]
+}
+
+/** Complete process-local assistant state at one follow opening. */
+export interface SessionAssistantStreamBaseline {
+  readonly revision: number
+  readonly activeAttempt?: SessionAssistantStreamAttempt
+}
+
+/** Browser wire form of one process-local assistant frame. */
+export type SessionAssistantStreamFrame =
+  | {
+    readonly type: 'start'
+    readonly attemptId: LlmAttemptId
+    readonly revision: number
+    readonly startedAfterSeq: SessionSeqCursor
+    readonly turn: number
+    readonly step: number
+  }
+  | {
+    readonly type: 'chunk'
+    readonly attemptId: LlmAttemptId
+    readonly revision: number
+    readonly index: number
+    readonly time: number
+    readonly chunk: JsonValue
+  }
+  | {
+    readonly type: 'end'
+    readonly attemptId: LlmAttemptId
+    readonly revision: number
+    /** Number of chunk frames represented by this terminal marker. */
+    readonly index: number
+    readonly outcome:
+      | {
+        readonly kind: 'committed'
+        readonly eventType: 'assistant/message' | 'assistant/attempt'
+        readonly seq: number
+      }
+      | { readonly kind: 'abandoned' }
+  }
 
 /** One contiguous backwards page of a Session log. */
 export interface SessionPage {
@@ -597,7 +814,7 @@ export interface SessionPage {
   readonly hasMore: boolean
 }
 
-/** Complete opening window followed by ordered events appended after its cursor. */
+/** Complete opening window followed by ordered durable events and opted-in assistant frames. */
 export type SessionFollowFrame =
   | {
     readonly type: 'snapshot'
@@ -606,8 +823,10 @@ export type SessionFollowFrame =
     readonly records: readonly SessionHistoryRecord[]
     readonly hasMore: boolean
     readonly projections: SessionProjectionBaseline
+    readonly assistantStream?: SessionAssistantStreamBaseline
   }
   | SessionEventEntry
+  | { readonly type: 'assistant-stream'; readonly frame: SessionAssistantStreamFrame }
 
 /** One pending inbox occurrence in the authoritative queue snapshot. */
 export interface SessionQueuedItem {

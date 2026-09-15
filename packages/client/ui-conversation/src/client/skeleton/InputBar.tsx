@@ -2,8 +2,8 @@
  * Machine state arrives through the standard provide channel
  * (useInput + inputActions); the keyboard/DOM command face and stop arrive
  * through this entry's own inject, whose hooks compartment binds
- * useNotices/useLexicon; layout-phase inputs (variant, placeholder,
- * region-slot content) ride the owner props. Session facts
+ * useNotices/useLexicon; layout-phase inputs (variant and placeholder) ride
+ * the owner props. Session facts
  * (running/removed/promptError) are self-selected via useSession.
  *
  * The text surface is the shell-owned Lexical editor bound here through
@@ -13,12 +13,11 @@
  * trigger instead of a parallel tree.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import {
-  IconCloseOutline16, IconFileOutline16, IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -35,29 +34,19 @@ import { DecoratorPortals } from '../input/editor/DecoratorPortals.tsx'
 import { registerComposerKeymap } from '../input/editor/keymap.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
 import { ContextMeter } from './ContextMeter.tsx'
-import { LanShareControl } from './LanShareControl.tsx'
 import { PermissionSelect } from './PermissionSelect.tsx'
 import css from './InputBar.module.css'
 
 export type InputBarProps = ComposerBarProps
 
-/** Image MIME types admitted through the model image channel. */
-const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
-
-/** Client pre-check limits for plain file uploads; the Host enforces its own. */
-const FILE_LIMITS = {
-  maxFilesPerMessage: 20,
-  maxFileBytes: 20 * 1024 * 1024,
-  maxMessageFileBytes: 200 * 1024 * 1024,
-} as const
-
-export function InputBar({
-  useSession, useInput, inputActions, keyboard, addImages, removeImage, draftImages,
+export const InputBar = memo(function InputBar({
+  useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
+  retryFileUpload,
   resolveSubmitMode, toggleCommandMenu, stop, command, t,
-  renderSlot, useNotices, useLexicon, useMenuLauncher,
+  renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, overlay, leftItems, rightItems, footer,
+  placeholder, accessory,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -78,10 +67,16 @@ export function InputBar({
   const draft = input?.draft ?? ''
   const editor = keyboard?.editor ?? null
   const attachments = useMemo(
-    () => input === undefined || draftImages === undefined ? [] : draftImages(input.imageIds),
-    [draftImages, input?.imageIds],
+    () => input === undefined || resolveDraftAttachments === undefined ? [] : resolveDraftAttachments(input.attachmentIds),
+    [resolveDraftAttachments, input?.attachmentIds],
   )
   const empty = draft.trim() === '' && attachments.length === 0
+  const uploads = useFileUploads(snapshot => snapshot)
+  // Send waits for every picked file: uploading and failed drafts both hold
+  // the gate (a failed upload is retried or removed, never silently dropped).
+  const uploadsPending = attachments.some(
+    attachment => attachment.kind === 'file' && uploads[attachment.id]?.status !== 'ready',
+  )
   // Transient error banner (machine notices, image-intake rejections, and
   // prompt failures): the seq keys the Toast so an identical repeated message
   // restarts the hold-then-fade cycle instead of reusing the faded one.
@@ -143,15 +138,16 @@ export function InputBar({
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
   const editorDisabled = removed || (locked && !workspaceTrigger)
   const editable = live && !locked && !machineBusy
-  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
+  const steeringAvailable = subagent === null || subagent.address.mode === 'continuable'
+  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && steeringAvailable
     && input.queue.some(row => row.placement === 'queued')
 
   useEffect(() => {
     if (input === undefined || inputActions === undefined) return
-    if (attachments.length !== input.imageIds.length) {
-      inputActions.pruneImages(attachments.map(attachment => attachment.id))
+    if (attachments.length !== input.attachmentIds.length) {
+      inputActions.pruneAttachments(attachments.map(attachment => attachment.id))
     }
-  }, [attachments, input?.imageIds, inputActions])
+  }, [attachments, input?.attachmentIds, inputActions])
 
   // Scroll the draft scrollport the minimum that brings the selection focus
   // into view — the browser's own behavior for typing, performed for the
@@ -224,147 +220,56 @@ export function InputBar({
     return () => { el.removeEventListener('wheel', onWheel) }
   }, [])
 
-  // Intake pre-check: an addition that would break
-  // a projected limit is refused as a whole batch, announced immediately, and
-  // never enters the rail — no more submit-time failure rolling the rail
-  // back. The host enforces the same limits at submit for callers that bypass
-  // this composer. Image MIME types ride the image channel; every other file
-  // is admitted as a plain file attachment against its own limits.
+  // Intake pre-check: an addition that would break a projected image limit is
+  // refused as a whole batch, announced immediately, and never enters the
+  // rail. Only the image subset is limit-checked: generic files carry no
+  // client-side size or count limit and upload as soon as they are picked.
+  // The host enforces the same image limits at submit for callers that bypass
+  // this composer.
   const intakeFiles = useCallback((files: readonly File[]): void => {
-    if (addImages === undefined || files.length === 0) return
-    const imageMedia = (imageLimits?.mediaTypes ?? IMAGE_MEDIA_TYPES) as readonly string[]
-    const imageFiles = files.filter(file => imageMedia.includes(file.type))
-    const otherFiles = files.filter(file => !imageMedia.includes(file.type))
-    const existingImages = attachments.filter(attachment => attachment.kind === 'image')
-    const existingFiles = attachments.filter(attachment => attachment.kind === 'file')
+    if (subagent !== null || addFiles === undefined || files.length === 0) return
     const rejected = ((): string | null => {
-      if (imageLimits !== undefined && imageFiles.length > 0) {
-        if (existingImages.length + imageFiles.length > imageLimits.maxImagesPerMessage) {
+      if (imageLimits !== undefined) {
+        const mediaTypes = imageLimits.mediaTypes as readonly string[]
+        const images = files.filter(file => mediaTypes.includes(file.type))
+        const imageAttachments = attachments.filter(attachment => attachment.kind === 'image')
+        if (imageAttachments.length + images.length > imageLimits.maxImagesPerMessage) {
           return t('image.tooMany', { count: imageLimits.maxImagesPerMessage })
         }
-        if (imageFiles.some(file => file.size > imageLimits.maxImageBytes)) {
+        if (images.some(file => file.size > imageLimits.maxImageBytes)) {
           return t('image.fileTooLarge', { size: imageSizeText(imageLimits.maxImageBytes) })
         }
-        const total = existingImages.reduce((sum, attachment) => sum + attachment.file.size, 0)
-          + imageFiles.reduce((sum, file) => sum + file.size, 0)
+        const total = imageAttachments.reduce((sum, attachment) => sum + attachment.file.size, 0)
+          + images.reduce((sum, file) => sum + file.size, 0)
         if (total > imageLimits.maxMessageImageBytes) {
           return t('image.totalTooLarge', { size: imageSizeText(imageLimits.maxMessageImageBytes) })
         }
       }
-      if (otherFiles.length > 0) {
-        if (existingFiles.length + otherFiles.length > FILE_LIMITS.maxFilesPerMessage) {
-          return t('file.tooMany', { count: FILE_LIMITS.maxFilesPerMessage })
-        }
-        if (otherFiles.some(file => file.size > FILE_LIMITS.maxFileBytes)) {
-          return t('file.fileTooLarge', { size: imageSizeText(FILE_LIMITS.maxFileBytes) })
-        }
-        const total = existingFiles.reduce((sum, attachment) => sum + attachment.file.size, 0)
-          + otherFiles.reduce((sum, file) => sum + file.size, 0)
-        if (total > FILE_LIMITS.maxMessageFileBytes) {
-          return t('file.totalTooLarge', { size: imageSizeText(FILE_LIMITS.maxMessageFileBytes) })
-        }
-      }
-      return addImages(files)
+      return addFiles(files)
     })()
     if (rejected !== null) showToast(rejected)
-  }, [addImages, attachments, imageLimits, showToast, t])
+  }, [subagent, addFiles, attachments, imageLimits, showToast, t])
 
-  const canAcceptDrop = !locked && !machineBusy && addImages !== undefined
-  const imageInputRef = useRef<HTMLInputElement | null>(null)
-  // Preserve the public attachment-slot owner contract for optional extension
-  // entries. The core bar owns the visible picker and pending-image feedback.
-  const attachmentSlot = renderSlot('conversation.input.attachments', {
-    attachments,
-    canAcceptDrop,
-    onAddImages: intakeFiles,
-    onRemoveImage: (id) => { removeImage?.(id) },
-    dropLimits: imageLimits === undefined ? undefined : {
-      count: imageLimits.maxImagesPerMessage,
-      size: imageSizeText(imageLimits.maxImageBytes),
-    },
-  })
-  const imageImportSlot = renderSlot('conversation.input.image-import', {
-    attachments,
-    canAcceptDrop,
-    onAddImages: intakeFiles,
-    onRemoveImage: (id) => { removeImage?.(id) },
-    dropLimits: imageLimits === undefined ? undefined : {
-      count: imageLimits.maxImagesPerMessage,
-      size: imageSizeText(imageLimits.maxImageBytes),
-    },
-  })
-  void attachmentSlot
-  void imageImportSlot
-  const openImagePicker = useCallback(() => { imageInputRef.current?.click() }, [])
-  const onPickImages = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
-    const files = [...(event.currentTarget.files ?? [])]
-    event.currentTarget.value = ''
-    if (files.length > 0) intakeFiles(files)
-  }, [intakeFiles])
+  const canAcceptDrop = subagent === null && !locked && !machineBusy && addFiles !== undefined
 
-  // Document-level file drop: dragging files anywhere over the window shows a
-  // full-viewport invitation and the released batch enters the composer's
-  // validation path. The listener set rides one lifetime and stays inert while
-  // the bar cannot accept drops.
-  const [dragActive, setDragActive] = useState(false)
-  const dragDepth = useRef(0)
-  useEffect(() => {
-    const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
-      const dataTransfer = event.dataTransfer
-      if (dataTransfer === null || !dataTransfer.types.includes('Files')) return null
-      return dataTransfer
-    }
-    const reset = (): void => {
-      dragDepth.current = 0
-      setDragActive(false)
-    }
-    const onDragEnter = (event: globalThis.DragEvent): void => {
-      if (fileTransfer(event) === null) return
-      event.preventDefault()
-      dragDepth.current += 1
-      setDragActive(true)
-    }
-    const onDragOver = (event: globalThis.DragEvent): void => {
-      const dataTransfer = fileTransfer(event)
-      if (dataTransfer === null) return
-      event.preventDefault()
-      dataTransfer.dropEffect = canAcceptDrop ? 'copy' : 'none'
-    }
-    const onDragLeave = (event: globalThis.DragEvent): void => {
-      if (fileTransfer(event) === null) return
-      dragDepth.current = Math.max(0, dragDepth.current - 1)
-      if (dragDepth.current === 0) setDragActive(false)
-      const leftViewport = event.clientX <= 0 || event.clientY <= 0
-        || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight
-      if ((event.target === document.documentElement || event.target === document.body) && leftViewport) reset()
-    }
-    const onDrop = (event: globalThis.DragEvent): void => {
-      const dataTransfer = fileTransfer(event)
-      if (dataTransfer === null) return
-      event.preventDefault()
-      reset()
-      if (canAcceptDrop) intakeFiles([...dataTransfer.files])
-    }
-    document.addEventListener('dragenter', onDragEnter)
-    document.addEventListener('dragover', onDragOver)
-    document.addEventListener('dragleave', onDragLeave)
-    document.addEventListener('drop', onDrop)
-    window.addEventListener('dragend', reset)
-    return () => {
-      document.removeEventListener('dragenter', onDragEnter)
-      document.removeEventListener('dragover', onDragOver)
-      document.removeEventListener('dragleave', onDragLeave)
-      document.removeEventListener('drop', onDrop)
-      window.removeEventListener('dragend', reset)
-    }
-  }, [canAcceptDrop, intakeFiles])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const onPickFiles = (e: ChangeEvent<HTMLInputElement>): void => {
+    const picked = e.target.files === null ? [] : [...e.target.files]
+    // Reset so picking the same file again re-fires the change event.
+    e.target.value = ''
+    if (picked.length > 0) intakeFiles(picked)
+  }
 
   // The keymap handlers read live bar state through this ref so the editor
   // registration survives re-renders without re-arming per keystroke.
   const gate = useRef({
-    locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeFiles,
+    locked, machineBusy, canSteerQueue, running, steeringAvailable, resolveSubmitMode,
+    intakeFiles, uploadsPending, showToast, t,
   })
-  gate.current = { locked, machineBusy, canSteerQueue, running, subagent, resolveSubmitMode, intakeFiles }
+  gate.current = {
+    locked, machineBusy, canSteerQueue, running, steeringAvailable, resolveSubmitMode,
+    intakeFiles, uploadsPending, showToast, t,
+  }
 
   useEffect(() => {
     if (editor === null || keyboard === undefined) return
@@ -385,10 +290,14 @@ export function InputBar({
           keyboard.steerQueue()
           return
         }
+        if (g.uploadsPending) {
+          g.showToast(g.t('file.stillUploading'))
+          return
+        }
         keyboard.submit(g.resolveSubmitMode(
           g.running,
           accelerated ? 'accelerated' : 'enter',
-          g.subagent === null,
+          g.steeringAvailable,
         ))
       },
       intakeFiles: (files) => { gate.current.intakeFiles(files) },
@@ -434,8 +343,8 @@ export function InputBar({
       return
     }
     if (inputActions === undefined) return // absent machine: the button is disabled
-    /* v8 ignore next -- defensive: the primary button is disabled while empty||disabled, so a click cannot reach the false arm. */
-    if (!empty && !disabled && !machineBusy) inputActions.submit()
+    /* v8 ignore next -- defensive: the primary button is disabled for empty, disabled, and pending-upload states. */
+    if (!empty && !disabled && !machineBusy && !uploadsPending) inputActions.submit()
   }
 
   // The Access seat: the projection-fed permission chip (renders nothing
@@ -504,48 +413,22 @@ export function InputBar({
         onClick={workspaceTrigger ? onRequestWorkspace : undefined}
         onPointerDown={workspaceTrigger ? (e) => { e.stopPropagation() } : undefined}
       >
-        {overlay !== undefined && <div className={css.overlayAnchor}>{overlay}</div>}
-        {accessory !== undefined && <div className={css.accessory}>{accessory}</div>}
-        {attachments.length > 0 && (
-          <div className={css.attachments} role="status">
-            <div className={css.attachmentSummary}>{t('image.added', { count: attachments.length })}</div>
-            <div className={css.attachmentList}>
-              {attachments.map((attachment) => {
-                const isImage = attachment.kind === 'image'
-                const displayName = attachment.file.name
-                  || (isImage ? t('image.pending') : t('file.pending'))
-                return (
-                  <div key={attachment.id} className={css.attachment}>
-                    {isImage
-                      ? (
-                        <img
-                          className={css.attachmentThumb}
-                          src={attachment.previewUrl}
-                          alt={displayName}
-                        />
-                      )
-                      : (
-                        <span className={css.attachmentFileIcon} aria-hidden>
-                          <IconFileOutline16 size={20} />
-                        </span>
-                      )}
-                    <span className={css.attachmentName}>{displayName}</span>
-                    <button
-                      type="button"
-                      className={css.removeAttachment}
-                      aria-label={t(isImage ? 'image.remove' : 'file.remove', { name: attachment.file.name })}
-                      title={t(isImage ? 'image.remove' : 'file.remove', { name: attachment.file.name })}
-                      onMouseDown={keepFocus}
-                      onClick={() => { removeImage?.(attachment.id) }}
-                    >
-                      <IconCloseOutline16 size={14} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+        {sessionId !== undefined && (
+          <div className={css.overlayAnchor}>{renderSlot('conversation.input.overlay', {})}</div>
         )}
+        {accessory !== undefined && <div className={css.accessory}>{accessory}</div>}
+        {renderSlot('conversation.input.attachments', {
+          attachments,
+          canAcceptDrop,
+          onAddFiles: intakeFiles,
+          onRemoveAttachment: (id) => { removeAttachment?.(id) },
+          uploads,
+          onRetryFile: (id) => { retryFileUpload?.(id) },
+          dropLimits: imageLimits === undefined ? undefined : {
+            count: imageLimits.maxImagesPerMessage,
+            size: imageSizeText(imageLimits.maxImageBytes),
+          },
+        })}
         {/* One scrollport, one text surface: the contenteditable grows with
             its content and .scroll — capped at 14 lines in CSS — is the only
             thing that scrolls. Chips are decorator portals inside the same
@@ -593,37 +476,41 @@ export function InputBar({
                 <IconPlusOutline16 size={14} />
               </button>
             </Tooltip>
-            <input
-              ref={imageInputRef}
-              className={css.imageInput}
-              type="file"
-              multiple
-              tabIndex={-1}
-              aria-hidden
-              onChange={onPickImages}
-            />
-            <Tooltip label={t('attachment.import')} side="top" delayMs={500}>
+            <Tooltip label={t('file.attach')} side="top" delayMs={500}>
               <button
                 type="button"
                 className={css.add}
-                aria-label={t('attachment.import')}
-                disabled={!canAcceptDrop}
+                aria-label={t('file.attach')}
+                disabled={subagent !== null || locked || machineBusy || addFiles === undefined}
                 onMouseDown={keepFocus}
-                onClick={openImagePicker}
+                onClick={() => { fileInputRef.current?.click() }}
               >
                 <IconPaperclipOutline16 size={14} />
               </button>
             </Tooltip>
-            <LanShareControl buttonClassName={css.add} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              disabled={subagent !== null}
+              hidden
+              onChange={onPickFiles}
+            />
+            {input === undefined || sessionId === undefined
+              ? null
+              : renderSlot('conversation.input.modelRoles', { locked })}
             <div className={css.modes}>
+              {accessSelect}
               {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
-              {sessionId === undefined ? null : renderSlot('conversation.input.jailbreak', { locked })}
             </div>
-            {leftItems}
+            {input === undefined || sessionId === undefined
+              ? null
+              : renderSlot('conversation.input.left', {})}
           </div>
           <div className={css.trailing}>
-            {rightItems}
-            {accessSelect}
+            {input === undefined || sessionId === undefined
+              ? null
+              : renderSlot('conversation.input.right', {})}
             {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             <ContextMeter useProjection={useProjection} t={t} />
             {interruptible && (
@@ -647,7 +534,7 @@ export function InputBar({
                 type="button"
                 className={css.primary}
                 aria-label={primaryLabel}
-                disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
+                disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy || uploadsPending}
                 onMouseDown={keepFocus}
                 onClick={onPrimary}
               >
@@ -665,19 +552,9 @@ export function InputBar({
           </div>
         </div>
       </div>
-      {dragActive && createPortal(
-        <div className={css.dropOverlay} aria-hidden>
-          <div className={clsx(css.dropPanel, !canAcceptDrop && css.dropPanelBlocked)}>
-            <IconPaperclipOutline16 size={28} className={css.dropIcon} />
-            <div className={css.dropTitle}>
-              {canAcceptDrop ? t('attachment.dropTitle') : t('attachment.dropBlocked')}
-            </div>
-            {canAcceptDrop && <div className={css.dropDesc}>{t('attachment.dropDesc')}</div>}
-          </div>
-        </div>,
-        document.body,
-      )}
-      {footer}
+      {variant === 'composer' && input !== undefined && sessionId !== undefined
+        ? renderSlot('conversation.composer.dock', {})
+        : null}
     </div>
   )
-}
+})

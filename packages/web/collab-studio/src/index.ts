@@ -16,7 +16,7 @@ import { StudioAbortedError } from './driver.ts'
 import { runProject } from './engine.ts'
 import { DEFAULT_STAGES, ROLES } from './prompts.ts'
 import { defaultDataDir, normalizeCreateRequest, StudioStore, StudioStoreError } from './store.ts'
-import type { ProjectRecord, ResolvedStudioConfig, StageSpec, StudioAgentsLike, StudioDefaultModelLike, StudioLlmLike, StudioPresetsLike } from './types.ts'
+import type { ProjectRecord, ResolvedStudioConfig, StageSpec, StudioAgentsLike, StudioConfig, StudioDefaultModelLike, StudioLlmLike, StudioPresetsLike } from './types.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'collab-studio'
@@ -32,15 +32,67 @@ declare module '@deepseek-ai/cordis' {
 
 /** The `collabStudio` service surface other rows may use. */
 export interface CollabStudioService {
+  /**
+   * List persisted collaboration projects.
+   * @returns persisted project records.
+   */
   listProjects(): Promise<unknown>
+  /**
+   * Create one collaboration project from a user request.
+   * @param request - untrusted project creation input.
+   * @returns the created project record.
+   */
   createProject(request: unknown): Promise<ProjectRecord>
+  /**
+   * Read one project together with its role and stage metadata.
+   * @param projectId - persisted project identifier.
+   * @returns project detail data.
+   */
   getProject(projectId: string): Promise<unknown>
+  /**
+   * Start one project pipeline.
+   * @param projectId - persisted project identifier.
+   * @returns whether the pipeline was started.
+   */
   startProject(projectId: string): Promise<{ started: boolean; reason?: string }>
+  /**
+   * Stop one running project pipeline.
+   * @param projectId - persisted project identifier.
+   * @returns whether an active pipeline was stopped.
+   */
   stopProject(projectId: string): Promise<{ stopped: boolean }>
+  /**
+   * Delete one project after stopping any active run.
+   * @param projectId - persisted project identifier.
+   * @returns whether the project was deleted.
+   */
   deleteProject(projectId: string): Promise<{ deleted: boolean }>
+  /**
+   * Read a bounded project event page.
+   * @param projectId - persisted project identifier.
+   * @param after - exclusive event cursor.
+   * @param limit - maximum number of events.
+   * @returns the event page and total count.
+   */
   events(projectId: string, after: number, limit: number): Promise<{ events: unknown[]; total: number }>
+  /**
+   * List files generated for one project.
+   * @param projectId - persisted project identifier.
+   * @returns project-relative file paths.
+   */
   files(projectId: string): Promise<string[]>
+  /**
+   * Read one bounded generated project file.
+   * @param projectId - persisted project identifier.
+   * @param path - project-relative file path.
+   * @returns file text and truncation status.
+   */
   readFile(projectId: string, path: string): Promise<{ text: string; truncated: boolean }>
+  /**
+   * Report whether one project pipeline is active.
+   * @param projectId - persisted project identifier.
+   * @returns whether the project has an active pipeline.
+   */
   isRunning(projectId: string): boolean
 }
 
@@ -169,7 +221,7 @@ interface RunEntry {
  * @param ctx - plugin context carrying the webServer service.
  * @param rawConfig - the composition row config (coerced defensively).
  */
-export function apply(ctx: Context, rawConfig: unknown): void {
+export function apply(ctx: Context, rawConfig: StudioConfig): void {
   const config = resolveStudioConfig(rawConfig)
   if (!config.enabled) return
   const webServer = ctx.get('webServer') as WebServerLike | undefined
@@ -208,7 +260,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       delete record.currentStage
       record.stageStatus = {}
       await store.save(record)
-      const driver = new AgentRoleDriver(agents, presets)
+      const driver = new AgentRoleDriver(agents, presets, defaultModel)
       const controller = new AbortController()
       const emit = emitFor(projectId)
       const done = (async (): Promise<void> => {
@@ -266,8 +318,15 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     return { stopped: true }
   }
 
+  /**
+   * Whether this process still owns the project's run. Read paths pass this to
+   * the store so a live run is never reconciled into a false "process restart"
+   * failure while it is still producing.
+   */
+  const isProjectLive = (projectId: string): boolean => runs.has(projectId) || starting.has(projectId)
+
   const service: CollabStudioService = {
-    listProjects: () => store.list(),
+    listProjects: () => store.list(isProjectLive),
     createProject: async (request: unknown) => {
       const normalized = normalizeCreateRequest(request)
       const record = await store.create(normalized, config.maxProjects)
@@ -280,7 +339,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       return record
     },
     getProject: async (projectId: string) => {
-      const record = await store.load(projectId)
+      const record = await store.load(projectId, isProjectLive)
       return { record, roles: ROLES, stages: DEFAULT_STAGES.map(stage => stageView(stage, record)) }
     },
     startProject,
@@ -298,7 +357,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     files: (projectId: string) => store.listFiles(projectId),
     readFile: async (projectId: string, path: string) => {
       // A read also proves the project exists; let NOT_FOUND surface as 404.
-      await store.load(projectId)
+      await store.load(projectId, isProjectLive)
       return store.readFile(projectId, path, config.maxFileReadBytes)
     },
     isRunning: (projectId: string) => runs.has(projectId),
@@ -344,8 +403,8 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     path: '/api/collab/projects',
     handler: (req, res) => {
       if (req.method === 'GET' || req.method === 'HEAD') {
-        void store.list()
-          .then(projects => { writeJson(res, 200, { projects }) })
+        void store.list(isProjectLive)
+          .then((projects) => { writeJson(res, 200, { projects }) })
           .catch(() => { writeJson(res, 500, { error: 'listing projects failed' }) })
         return
       }
@@ -416,7 +475,11 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       const url = new URL(req.url ?? '/', 'http://x')
       const after = Number(url.searchParams.get('after') ?? '0')
       const limit = Number(url.searchParams.get('limit') ?? '300')
-      const result = await service.events(projectId, Number.isFinite(after) && after > 0 ? Math.floor(after) : 0, Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 300)
+      const result = await service.events(
+        projectId,
+        Number.isFinite(after) && after > 0 ? Math.floor(after) : 0,
+        Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 300,
+      )
       writeJson(res, 200, result)
       return
     }
@@ -440,7 +503,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
       return
     }
     if (suffix === '/files' && (method === 'GET' || method === 'HEAD')) {
-      await store.load(projectId)
+      await store.load(projectId, isProjectLive)
       writeJson(res, 200, { files: await store.listFiles(projectId) })
       return
     }
@@ -466,7 +529,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
     for (const run of pending) run.controller.abort()
     return Promise.race([
       Promise.allSettled(pending.map(run => run.done)),
-      new Promise<void>(resolve => {
+      new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 10_000)
         if (typeof timer.unref === 'function') timer.unref()
       }),

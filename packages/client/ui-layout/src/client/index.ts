@@ -12,8 +12,14 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+// Registers the remote namespaces this file calls (session, agentPresets).
+import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
+import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PanelActions } from './service.ts'
 import { AppFrame } from './AppFrame.tsx'
+import type { ConversationComposition, ConversationCreator, CreationOptions } from './conversation-creator.ts'
+import { ConversationCreateError, createConversationCreator } from './conversation-creator.ts'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from './theme-presenter.ts'
@@ -111,6 +117,117 @@ export interface DetailsOwnerProps {}
 export const inject = ['slots', 'theme', 'locale']
 
 /**
+ * Build the real-creation capability the frame injects into itself.
+ *
+ * The controllers are resolved LAZILY, at the moment a creation is actually
+ * requested, rather than at apply time: the shell frame must mount
+ * unconditionally (it owns the whole app surface, and booting it behind a
+ * session/workspace controller would blank the GUI if either failed to load),
+ * while a creation cannot legitimately happen before those controllers exist.
+ * A missing controller therefore reports itself as a located failure instead of
+ * waiting or pretending to succeed.
+ * @param ctx - client root context (services are registry-live, not snapshots).
+ * @returns the creator face handed to AppFrame through the entry inject.
+ */
+function layoutCreator(ctx: ClientContext): ConversationCreator {
+  // Remote namespaces are resolved through ctx.get, NOT as ctx properties.
+  // Each generated namespace is its own service (`remote.<namespace>`), and
+  // Cordis routes a property read through the fiber's inject gate — which this
+  // plugin deliberately does not declare, because the shell frame must mount
+  // unconditionally rather than parking until the gateway is up. A store lookup
+  // is inject-free, so a namespace that has not installed yet reads as
+  // undefined instead of throwing. Resolution is lazy for the same reason: it
+  // happens when a creation is requested, by which point the gateway serves.
+  const requireNamespace = <K extends 'agentPresets' | 'session'>(name: K): ClientRemote[K] => {
+    const namespace = ctx.get(`remote.${name}`) as ClientRemote[K] | undefined
+    if (namespace === undefined) {
+      throw new ConversationCreateError('validate', `the remote ${name} namespace is not available in this client`)
+    }
+    return namespace
+  }
+  // Both choices are committed through the real Host routes the ordinary
+  // session surfaces use; neither is representable in the client create call.
+  const composition: ConversationComposition = {
+    async selectPreset(sessionId, agentPreset) {
+      const result = await requireNamespace('agentPresets').select(sessionId, agentPreset)
+      return result.ok ? undefined : `${result.error.code}: ${result.error.message}`
+    },
+    async selectModel(sessionId, model) {
+      const result = await requireNamespace('session').selectModel({
+        sessionId,
+        provider: model.provider,
+        model: model.model,
+        ...model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort },
+      })
+      return result.ok ? undefined : `${result.error.code}: ${result.error.message}`
+    },
+  }
+  return {
+    async create(request) {
+      const sessions = ctx.get('sessions') as ISessions | undefined
+      const workspaces = ctx.get('workspaces') as IWorkspaces | undefined
+      if (sessions === undefined) {
+        throw new ConversationCreateError('validate', 'the session controller is not available in this client')
+      }
+      if (workspaces === undefined) {
+        throw new ConversationCreateError('validate', 'the workspace controller is not available in this client')
+      }
+      return createConversationCreator(sessions, workspaces, composition).create(request)
+    },
+    async listOptions(): Promise<CreationOptions> {
+      // Roster and catalog are independent Host reads; a failure in one must
+      // not blank the other, so each is settled on its own and reported where
+      // it belongs rather than collapsing the whole list.
+      const [roster, catalog] = await Promise.all([
+        requireNamespace('agentPresets').list(),
+        requireNamespace('session').modelCatalog(),
+      ])
+      const presets = roster.ok
+        ? roster.value.presets
+          // A broken preset cannot compose a session, so it is not offered.
+          .filter(row => row.broken === undefined)
+          .map(row => ({ id: row.id, label: row.name ?? row.id, isDefault: row.isDefault }))
+        : []
+      if (!roster.ok) {
+        return {
+          presets: [],
+          providers: [],
+          routableProviders: [],
+          failures: [`agentPresets.list: ${roster.error.code}: ${roster.error.message}`],
+        }
+      }
+      if (!catalog.ok) {
+        return {
+          presets,
+          providers: [],
+          routableProviders: [],
+          failures: [`session.modelCatalog: ${catalog.error.code}: ${catalog.error.message}`],
+        }
+      }
+      return {
+        presets,
+        providers: catalog.value.groups.map(group => ({
+          id: group.id,
+          label: group.name,
+          models: group.models.map(model => ({ id: model.id, label: model.name })),
+        })),
+        routableProviders: catalog.value.routableProviders,
+        defaultModel: {
+          provider: catalog.value.default.provider,
+          model: catalog.value.default.model,
+          ...catalog.value.default.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: catalog.value.default.reasoningEffort },
+        },
+        // Provider-local catalog failures are reported, never silently dropped:
+        // a missing provider must not read as "this deployment has no such models".
+        failures: catalog.value.failures.map(failure => `${failure.name}: ${failure.message}`),
+      }
+    },
+  }
+}
+
+/**
  * Client plugin body: provide ctx.layout, then one register() call — AppFrame
  * into 'root' with the four child-slot declarations, the layout store seat,
  * and the inject hook that hands the store's bound actions to the service.
@@ -118,6 +235,7 @@ export const inject = ['slots', 'theme', 'locale']
  */
 export function apply(ctx: ClientContext): void {
   const layout = new LayoutController()
+  const createConversation = layoutCreator(ctx)
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
@@ -136,7 +254,7 @@ export function apply(ctx: ClientContext): void {
       // conversation business actions belong to their registrants.
       inject: (actions: PanelActions) => {
         layout.attachPanels(actions)
-        return {}
+        return { createConversation }
       },
     }, AppFrame)
     return () => {

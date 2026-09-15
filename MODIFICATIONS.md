@@ -12,10 +12,10 @@ English note at the [end](#english-note).
 | 基线提交 | `cd5ef8148158c3a752a658978873241fdf8e2bbc` |
 | 对应版本 | `0.1.2-alpha.1`（release 分支 `release/dsh-0.1.2-alpha.1` 的合并提交，PR #3248） |
 | 原版许可证 | MIT License，Copyright (c) 2026 DeepSeek |
-| 当前同步源码 | `dsh-v0.1.2-alpha.5`，来源工作树提交 `3b479baa1cec71898a95684a3daa21f40934ac7f` |
+| 当前同步源码 | `dsh-v0.1.5-rc.2`，来源工作树提交 `4f3b2070ebdb5c44171405f1b841e2719057f5b4` |
 
-本仓库当前采用三段式发布历史：第 1 个提交是上游基线的原样导入（squashed import），第 2 个提交是首次二改完整体，第 3 个提交同步上游至 `dsh-v0.1.2-alpha.5` 并加入本次本地增强。
-查看第 2、3 个提交的 diff，可以分别看到初始二改和后续增量改动。
+本仓库当前采用四段式发布历史：第 1 个提交是上游基线的原样导入（squashed import），第 2 个提交是首次二改完整体，第 3 个提交同步上游至 `dsh-v0.1.2-alpha.5`，第 4 个提交同步至 `dsh-v0.1.5-rc.2` 并加入本次本地增强。
+查看第 2–4 个提交的 diff，可以分别看到初始二改和后续增量改动。
 
 ## 总体规模
 
@@ -157,14 +157,52 @@ English note at the [end](#english-note).
   `.agents/notes/implemented/bug-fix/2026-08-30-reasoning-control-tags-stay-out-of-chat.*`、
   `.agents/notes/implemented/process/2026-08-28-localmod-recovery-playbook.md`。
 
+### 13. 双模型角色（思考 / 执行）
+
+- host 侧 `packages/api/session-controller/src/model-roles-projection.ts`：会话级双模型角色配置与其持久化投影，
+  可分别指定「思考模型」与「执行模型」；`src/types.ts`、`src/index.ts`、`src/agent.ts`、`src/commands.ts` 配套扩展。
+- 客户端 `packages/client/ui-model-selection/src/client/ModelRolesControl.tsx`（+样式）、`model-roles.ts`、`roles-directory.ts`。
+- 测试：`packages/api/session-controller/tests/session-models.host.spec.ts`、`ui-model-selection/tests/model-select.client.spec.tsx`。
+
+### 14. 提示词增强（Prompt Enhancer）
+
+- host 侧 `packages/api/session-controller/src/prompt-enhancement.ts`：有界读取工作区上下文（文件数 / 目录深度 / 单文件与总字节数
+  均设上限），显式跳过 `.git`、`node_modules`、`dist`、`vendor`、`.env`、`credentials`、`id_rsa` 等敏感项，
+  再以客户端指定的模型发起一次严格文本调用，返回增强后的提示词。
+- 客户端 `packages/client/ui-model-selection/src/client/PromptEnhancer.tsx`（+样式）：输入栏入口、结果预览与回填。
+- 测试：`packages/api/session-controller/tests/prompt-enhancement.host.spec.ts`、`ui-model-selection/tests/prompt-enhancer.client.spec.tsx`。
+
+### 15. 对话创造（Conversation Create）
+
+- 客户端 `packages/client/ui-layout/src/client/ConversationCreateApp.tsx`（+样式）、`conversation-create.ts`、`conversation-creator.ts`：
+  编排一段完整对话草稿（用户 / 助手 / 工具调用 / 工具结果四类条目，支持上下移动与字段编辑），选择分组目录、智能体预设与模型后
+  创建为**真实会话**并逐轮执行；含草稿校验、预览/编辑切换、执行进度与分阶段失败提示（校验 / 创建 / 绑定 / 预设 / 发送 / 执行）。
+- 测试：`packages/client/ui-layout/tests/conversation-create.client.spec.ts`。
+
+### 16. 历史会话路由与事件
+
+- `packages/core/session/src/historical-route.ts`、`historical-events.ts`：跨版本会话日志的读取路由与历史事件支撑。
+- 相关：`packages/session/session-format-v0-to-v1/tests/validation.spec.ts`、
+  `packages/session/session-persistence-jsonl/tests/v3-event-admission.spec.ts`。
+
+### 17. 模型适配与插件清单更新
+
+- `packages/llm/llm-deepseek/`：`serialize.ts`、`types.ts`、`index.ts`、`adapter.ts` 与序列化测试。
+- `packages/llm/llm-pi-ai/`：`adapter.ts`、`config.ts` 与适配测试。
+- `packages/llm/plugin-package-inventory-deepseek/`：清单实现与测试。
+- `packages/web/collab-studio/`：`driver.ts`、`store.ts`、`types.ts`、`index.ts` 与测试增强。
+
 ## 三、有意不包含的内容
 
 以下存在于本地工作目录、但**有意排除**在本仓库之外：
 
-- 构建产物与打包件（`dist/`、`*.tgz`）、`*.tsbuildinfo`、coverage、快照缓存等。
-- 全部运行日志与测试输出（`*.log`、`*-out.txt` 等）。
+- 构建产物与打包件（`dist/`、`lib/`、`*.tgz`）、`*.tsbuildinfo`、coverage、快照缓存等；源码树中未跟踪的编译输出
+  （`.js` / `.js.map` / `.d.ts` / `.d.ts.map` 等）同样排除，本仓库只包含真实源码。
+- 全部运行日志与测试输出（`*.log`、`*-out.txt`、`vitest-*.log`、`tsbi-out.txt` 等）。
 - 本机专用启动/重启脚本（含机器特定路径，如 `start-dsh-web.bat`、`restart-dsh-web.*`）。
-- 本地规划过程文档（`.planning/`）与代理工作区目录（`.sessions/`、`.dsh-build/` 等）。
+- 本地规划过程文档（`.planning/`、`task_plan.md`、`progress.md`、`findings.md`）与代理工作区目录
+  （`.sessions/`、`.dsh-build/`、`.workbuddy/` 等）。
+- 源码中的本机绝对路径已改为通用相对路径（如语音服务与 LoRA 服务的启动命令提示），不暴露个人目录结构。
 - 上游 GitHub Actions 工作流（`.github/workflows/`）：这些工作流绑定上游官方 CI 基础设施
   （官方 secrets、专用 runner、发布流水线），在二次修改仓库中无法也不应运行，故整体移除；
   `.github/` 其余内容（issue 模板、dependabot 等）保留。
@@ -179,6 +217,12 @@ The initial modification commit changed 389 files, +36,620 / −870 lines (173 f
 The current release also includes the upstream alpha.2–alpha.5 synchronization and a local model-bench increment:
 strict four-category difficulty contracts, `easy`/`medium`/`hard` prompt rules, difficulty-scaled phase timeouts,
 defensive metadata/verdict parsing, and matching English/Chinese UI copy with focused tests.
+
+The latest release (`dsh-v0.1.5-rc.2`) additionally carries a session-level dual-model role split
+(thinking/worker) with a persisted projection, one-click prompt enhancement that reads bounded workspace
+context through an explicit skip-list before a single strict model call, a conversation-creation flow that
+turns an authored multi-entry draft into a real session executed turn by turn, historical session route/event
+support, and Collab Studio driver/store improvements with focused tests.
 
 The modifications add, among other things: an AI news aggregation section, a read-only skill marketplace,
 a Hindsight-backed knowledge center, a multi-model benchmark bench, a LoRA training studio wrapping a local

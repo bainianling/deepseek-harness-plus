@@ -19,6 +19,7 @@ import {
   IconApiOutline14,
   IconChipOutline16,
   IconCodeOutline16,
+  IconEditOutline16,
   IconGaugeOutline16,
   IconKnowledgeOutline16,
   IconNetworkOutline16,
@@ -29,12 +30,15 @@ import {
   WallpaperLayer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
+import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import {
   computeColumns, NAVRAIL_WIDTH, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT,
 } from './columns.ts'
 import { CollabStudioApp } from './CollabStudioApp.tsx'
+import { ConversationCreateApp } from './ConversationCreateApp.tsx'
+import type { ConversationCreator } from './conversation-creator.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
 import { KnowledgeHubApp } from './KnowledgeHubApp.tsx'
 import { LoraTrainApp } from './LoraTrainApp.tsx'
@@ -46,8 +50,21 @@ import { VoiceCloneApp } from './VoiceCloneApp.tsx'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface GlobalStandardProps {
+    /**
+     * Workspace selector hook. Declared here as a CONSUMER, exactly as
+     * ui-conversation declares it: the Workspace UI owns and publishes this
+     * root standard hook, and ui-layout only reads it for the group selector.
+     * Re-providing it would be a duplicate root contribution, so this is a
+     * type-only re-declaration and deliberately not an inject entry.
+     */
+    useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>
+  }
+}
+
 /** One app-level navigation section of the left nav rail. */
-export type NavSection = 'work' | 'terminal' | 'voice' | 'news' | 'lora' | 'collab' | 'bench' | 'knowledge' | 'market'
+export type NavSection = 'work' | 'terminal' | 'voice' | 'news' | 'lora' | 'collab' | 'bench' | 'knowledge' | 'market' | 'conversationCreate'
 
 /** Nav-rail glyph shape shared by every section icon component. */
 type NavIcon = (props: { size?: number; className?: string }) => ReactElement
@@ -56,12 +73,13 @@ type NavIcon = (props: { size?: number; className?: string }) => ReactElement
 interface NavSectionSpec {
   id: NavSection
   icon: NavIcon
-  labelKey: 'nav.work' | 'nav.terminal' | 'nav.voiceClone' | 'nav.news' | 'nav.lora' | 'nav.collab' | 'nav.bench' | 'nav.knowledge' | 'nav.market'
+  labelKey: 'nav.work' | 'nav.terminal' | 'nav.voiceClone' | 'nav.news' | 'nav.lora' | 'nav.collab' | 'nav.bench' | 'nav.knowledge' | 'nav.market' | 'nav.conversationCreate'
 }
 
 /** The nav sections in rail order: the harness work area first. */
 const NAV_SECTIONS: readonly NavSectionSpec[] = [
   { id: 'work', icon: IconCodeOutline16, labelKey: 'nav.work' },
+  { id: 'conversationCreate', icon: IconEditOutline16, labelKey: 'nav.conversationCreate' },
   { id: 'terminal', icon: IconApiOutline14, labelKey: 'nav.terminal' },
   { id: 'voice', icon: IconVoiceOutline16, labelKey: 'nav.voiceClone' },
   { id: 'news', icon: IconNewsOutline16, labelKey: 'nav.news' },
@@ -79,7 +97,7 @@ const NAV_STORAGE_KEY = 'dsh.navSection'
 function readStoredNavSection(): NavSection {
   try {
     const stored = window.localStorage.getItem(NAV_STORAGE_KEY)
-    if (stored === 'work' || stored === 'terminal' || stored === 'voice' || stored === 'news' || stored === 'lora' || stored === 'collab' || stored === 'bench' || stored === 'knowledge' || stored === 'market') return stored
+    if (stored === 'work' || stored === 'conversationCreate' || stored === 'terminal' || stored === 'voice' || stored === 'news' || stored === 'lora' || stored === 'collab' || stored === 'bench' || stored === 'knowledge' || stored === 'market') return stored
   } catch { /* storage unavailable (private mode, embedded frame) — use default */ }
   return 'work'
 }
@@ -124,12 +142,31 @@ function NavRail({ section, onNavigate, t }: {
   )
 }
 
+/**
+ * The frame's own injected business face, supplied by the layout plugin's
+ * entry inject (see `src/client/index.ts`). This is deliberately a LOCAL face
+ * rather than a SlotMap declaration: the built-in `root` entry cannot be
+ * re-declared with an added field (a merged interface member must keep its
+ * exact type), so the frame types its own inject instead of borrowing
+ * `SlotInjectOf<'root'>`.
+ *
+ * Only `createConversation` lives here. `useWorkspaces` is NOT injected: the
+ * Workspace UI already publishes it as a root standard hook and the renderer
+ * rejects a duplicate root contribution (`duplicate root standard hook`), so
+ * ui-layout re-declares the existing global prop instead of providing it.
+ */
+export interface LayoutInjectedFace {
+  /** Real conversation creation, executed over the live Session Controller. */
+  createConversation: ConversationCreator
+}
+
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & PropsLocale<'common'>
+  & LayoutInjectedFace
 
 /** Read the optional target viewport embedded in a LAN-share URL. */
 function sharedViewport(): { width: number; height: number } | undefined {
@@ -207,6 +244,8 @@ export function AppFrame({
   useStore,
   useSessions,
   useCurrentSession,
+  createConversation,
+  useWorkspaces,
   actions,
   renderSlot,
   SessionProvider,
@@ -371,6 +410,9 @@ export function AppFrame({
       </div>
       {/* Application sections keep the work shell mounted-but-hidden beside
           them, so switching back is instant and session streams never drop. */}
+      {!onWorkSection && effectiveSection === 'conversationCreate' && (
+        <ConversationCreateApp createConversation={createConversation} useWorkspaces={useWorkspaces} t={t} />
+      )}
       {!onWorkSection && effectiveSection === 'terminal' && <TerminalApp session={currentSession} t={t} />}
       {!onWorkSection && effectiveSection === 'voice' && <VoiceCloneApp t={t} />}
       {!onWorkSection && effectiveSection === 'news' && <NewsPanel t={t} />}

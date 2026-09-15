@@ -131,7 +131,14 @@ export interface StudioAgentLike {
   readonly status: 'idle' | 'running'
   readonly session: {
     readonly id: string
-    readonly events: readonly { readonly type: string; readonly seq: number; readonly data: unknown }[]
+    /** Current Session API: read the append-only log through seq/snapshotEvents. */
+    readonly seq: number
+    /** Append one durable session event (used to pin the role's approval policy). */
+    append(type: string, data: unknown): unknown
+    snapshotEvents(
+      fromSeq?: number,
+      toSeqExclusive?: number,
+    ): readonly { readonly type: string; readonly seq: number; readonly data: unknown }[]
     readonly header: { readonly seedLength?: number }
   }
   followup(message: unknown): void
@@ -145,7 +152,7 @@ export interface StudioAgentsLike {
     readonly sessionId: string
     readonly meta?: { readonly cwd?: string; readonly origin?: string }
     readonly agentOptions?: { readonly provider?: string; readonly model?: string }
-    readonly setup?: (agentCtx: unknown) => Promise<void> | void
+    readonly setup?: (agentCtx: unknown, agent: StudioAgentLike) => Promise<void> | void
   }): Promise<{ readonly agent: StudioAgentLike; dispose(): Promise<void> }>
 }
 
@@ -162,7 +169,19 @@ export interface StudioLlmLike {
 
 /** Structural default-model surface (mirrors agentDefaultModel). */
 export interface StudioDefaultModelLike {
-  currentSelection(): { readonly provider: string; readonly model: string }
+  /**
+   * Read the current deployment default selection.
+   *
+   * `reasoningEffort` is carried through when present: the model-selection
+   * coupling treats an absent effort as "clear any inherited effort and use the
+   * provider default", so dropping a configured effort here would silently run
+   * every role at lower reasoning than the deployment selected.
+   */
+  currentSelection(): {
+    readonly provider: string
+    readonly model: string
+    readonly reasoningEffort?: string
+  }
 }
 
 /** One role driver the engine speaks through (real agents in production). */
@@ -179,11 +198,17 @@ export interface RoleDriver {
 
 /** Deployment limits accepted by the plugin row config. */
 export interface StudioConfig {
+  /** Enable the collaboration studio routes and service. */
   readonly enabled?: boolean
+  /** Absolute data directory for persisted projects. */
   readonly dataDir?: string
+  /** Maximum number of persisted projects. */
   readonly maxProjects?: number
+  /** Maximum number of retained events returned per project. */
   readonly maxEventTail?: number
+  /** Maximum consensus rounds per meeting. */
   readonly maxMeetingRounds?: number
+  /** Maximum bytes readable from one generated project file. */
   readonly maxFileReadBytes?: number
 }
 

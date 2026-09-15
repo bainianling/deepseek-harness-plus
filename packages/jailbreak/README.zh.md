@@ -1,3 +1,8 @@
+---
+description: "已记录的破甲模式评估能力包映射：策略注入、持久状态、命令和会话投影。"
+kind: "package-group"
+---
+
 # jailbreak/ — 红队破甲模式
 
 [English](README.md) | 中文

@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { ModelCatalogDirectory } from './catalog.ts'
 import { ModelDirectory } from './directory.ts'
+import { ModelRolesDirectory } from './roles-directory.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -29,13 +30,15 @@ declare module '@deepseek-ai/cordis' {
 interface LiveState {
   /** Per-session directories; entries are deleted by their scope disposer. */
   readonly directories: Map<SessionId, ModelDirectory>
+  /** Per-session dual-model roles stores; entries are deleted by their scope disposer. */
+  readonly roles: Map<SessionId, ModelRolesDirectory>
 }
 
 /** The `ctx.modelDirectories` session model-selection service. */
 export class ModelDirectoryResolver extends Service {
   static inject = ['sessions', 'remote', 'remote.session']
 
-  private readonly live: LiveState = { directories: new Map() }
+  private readonly live: LiveState = { directories: new Map(), roles: new Map() }
   private readonly catalog: ModelCatalogDirectory
 
   /** Localized composer-block copy; this plugin owns the string it raises. */
@@ -108,5 +111,38 @@ export class ModelDirectoryResolver extends Service {
       live.directories.delete(sessionId)
     }, 'ui-model-selection: session directory')
     return directory
+  }
+
+  /**
+   * Resolve the per-session dual-model roles store (lazy; the scope disposer
+   * removes and disposes it). The roles store shares the session's model
+   * directory and catalog so the roles panel never loads a second catalog.
+   * @param sessionId - the owning session.
+   * @param directory - the session's resident model directory.
+   * @returns the resident roles store.
+   */
+  rolesDirectoryFor(sessionId: SessionId, directory: ModelDirectory): ModelRolesDirectory {
+    const { live } = this
+    const existing = live.roles.get(sessionId)
+    if (existing !== undefined) return existing
+    const sessions = this.ctx.sessions
+    const actx = sessions.scope(sessionId)
+    if (actx === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no scope`)
+    const binding = sessions.binding(sessionId)
+    if (binding === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no binding`)
+    const roles = new ModelRolesDirectory(
+      this.ctx.remote.session,
+      sessionId,
+      this.catalog,
+      directory,
+      binding.session.projections.faceOf('modelRoles') as unknown as import('@deepseek-ai/dsh-client-store').ObservableSnapshot<unknown>,
+      sessions.subagentAddress(sessionId) === undefined,
+    )
+    live.roles.set(sessionId, roles)
+    actx.effect(() => () => {
+      roles.dispose()
+      live.roles.delete(sessionId)
+    }, 'ui-model-selection: session roles')
+    return roles
   }
 }

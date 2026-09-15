@@ -65,6 +65,12 @@ export interface Config {
   hindsightBankId: string
   /** Maximum duration of one Hindsight read. */
   knowledgeTimeoutMs: number
+  /** Local Hindsight profile passed to the fixed daemon command. */
+  hindsightProfile: string
+  /** Trusted executable name or absolute path for manual daemon startup. */
+  hindsightCommand: string
+  /** Bounded wait for the daemon to become healthy after a manual start. */
+  hindsightStartTimeoutMs: number
 }
 
 export const Config: z<Config> = z.object({
@@ -75,6 +81,9 @@ export const Config: z<Config> = z.object({
   hindsightUrl: z.string().default('http://127.0.0.1:9077'),
   hindsightBankId: z.string().default('coding-agent::deepseek-harness'),
   knowledgeTimeoutMs: z.number().min(100).max(30_000).default(5_000),
+  hindsightProfile: z.string().default('dsh-local'),
+  hindsightCommand: z.string().default('hindsight-embed'),
+  hindsightStartTimeoutMs: z.number().min(10_000).max(300_000).default(240_000),
 })
 
 /** Bind-dependent Web values shared by the trust fence and LAN sharing control. */
@@ -183,12 +192,24 @@ function isLoopbackRequest(req: IncomingMessage): boolean {
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '')
 }
 
-/** Read an IPv4 Host header literal, rejecting a port-less or malformed authority. */
+/** Normalize URL hostname spelling, including Node's bracketed IPv6 form. */
+function normalizedHostname(value: string): string {
+  const lower = value.toLowerCase()
+  return lower.startsWith('[') && lower.endsWith(']') ? lower.slice(1, -1) : lower
+}
+
+function isLoopbackHostname(value: string): boolean {
+  return ['127.0.0.1', 'localhost', '::1'].includes(normalizedHostname(value))
+}
+
+/** Read a Host header literal, rejecting malformed authorities and userinfo. */
 function hostAddress(req: IncomingMessage): string | undefined {
   const authority = req.headers.host
   if (authority === undefined) return undefined
   try {
-    return new URL(`http://${authority}`).hostname
+    const parsed = new URL(`http://${authority}`)
+    if (parsed.username !== '' || parsed.password !== '') return undefined
+    return normalizedHostname(parsed.hostname)
   } catch {
     return undefined
   }
@@ -206,9 +227,25 @@ function isExplicitTrustedHost(req: IncomingMessage, trustedHosts: readonly stri
 function isLocalControlRequest(req: IncomingMessage): boolean {
   if (!isLoopbackRequest(req)) return false
   const origin = req.headers.origin
+  // A local non-browser client (for example curl) has no Origin. It is still
+  // constrained by the loopback socket; browser requests take the stricter
+  // exact-origin path below.
   if (origin === undefined) return true
+  const authority = req.headers.host
+  if (authority === undefined) return false
   try {
-    return ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(origin).hostname)
+    const originUrl = new URL(origin)
+    const hostUrl = new URL(`http://${authority}`)
+    const protocol = (req.socket as IncomingMessage['socket'] & { encrypted?: boolean }).encrypted === true ? 'https:' : 'http:'
+    if (hostUrl.username !== '' || hostUrl.password !== '') return false
+    return originUrl.protocol === protocol
+      && originUrl.username === ''
+      && originUrl.password === ''
+      && originUrl.pathname === '/'
+      && originUrl.search === ''
+      && originUrl.hash === ''
+      && isLoopbackHostname(originUrl.hostname)
+      && originUrl.host === hostUrl.host
   } catch {
     return false
   }
@@ -314,7 +351,16 @@ export const internals: {
  */
 export function apply(ctx: Context, config: Config): void {
   const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
-  registerKnowledgeRoutes(ctx, config)
+  // Knowledge routes are more specific than Connection's /api prefix. Register
+  // them only after Connection is available and reuse its trust/auth decision.
+  ctx.inject(['connection', 'webServer'], (connectionCtx) => {
+    registerKnowledgeRoutes(
+      connectionCtx,
+      config,
+      isLocalControlRequest,
+      request => connectionCtx.connection.requestRejection(request),
+    )
+  })
   registerMarketRoutes(ctx)
   let enabled = false
   const lanShare: LanShare = {

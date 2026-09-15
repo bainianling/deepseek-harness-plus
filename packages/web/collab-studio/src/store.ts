@@ -120,8 +120,22 @@ export class StudioStore {
     await rename(tmp, target)
   }
 
-  /** Load one record; a record left `running` by a restart settles as `stopped`. */
-  async load(projectId: string): Promise<ProjectRecord> {
+  /**
+   * Load one record; a record left `running` by a restart settles as `stopped`.
+   *
+   * The reconciliation is for a run this process no longer owns. A record whose
+   * run is still live in memory must be returned untouched, otherwise every
+   * status read during a healthy run rewrites it to `stopped` with a
+   * "process restart" error — a false crash report that also races the engine's
+   * own `save()` calls.
+   *
+   * @param projectId - project whose record to read.
+   * @param isLive - optional predicate reporting whether this process still owns
+   * the project's run; absent means "nothing is live", preserving restart
+   * reconciliation for callers that have no run registry.
+   * @returns the durable record, reconciled only when its run is really gone.
+   */
+  async load(projectId: string, isLive?: (projectId: string) => boolean): Promise<ProjectRecord> {
     const path = join(this.projectDir(projectId), PROJECT_NAME_FILE)
     let raw: string
     try {
@@ -130,7 +144,7 @@ export class StudioStore {
       throw new StudioStoreError(`project "${projectId}" not found`, 'NOT_FOUND')
     }
     const record = JSON.parse(raw) as ProjectRecord
-    if (record.status === 'running') {
+    if (record.status === 'running' && !(isLive?.(projectId) ?? false)) {
       record.status = 'stopped'
       record.error = '进程重启，流水线中断；可重新开始'
       await this.save(record)
@@ -138,8 +152,14 @@ export class StudioStore {
     return record
   }
 
-  /** Every project summary in creation order (oldest first). */
-  async list(): Promise<ProjectSummary[]> {
+  /**
+   * Every project summary in creation order (oldest first).
+   *
+   * @param isLive - optional run-liveness predicate forwarded to {@link load},
+   * so listing does not settle a project whose run is still live.
+   * @returns one summary per readable project directory.
+   */
+  async list(isLive?: (projectId: string) => boolean): Promise<ProjectSummary[]> {
     let entries: string[]
     try {
       entries = await readdir(this.root)
@@ -149,7 +169,7 @@ export class StudioStore {
     const summaries: ProjectSummary[] = []
     for (const entry of entries) {
       try {
-        const record = await this.load(entry)
+        const record = await this.load(entry, isLive)
         summaries.push({
           id: record.id,
           name: record.name,

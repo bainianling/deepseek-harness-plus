@@ -28,7 +28,7 @@ async function agentWithSession(ctx: Context, id = 'agent-1', cwd?: string): Pro
   const session = Session.create(
     SessionId(id),
     undefined,
-    { version: 0, id: SessionId(id), createdAt: 0, isSeeded: false, ...(cwd !== undefined ? { cwd } : {}) },
+    { version: 3, id: SessionId(id), createdAt: 0, isSeeded: false, ...(cwd !== undefined ? { cwd } : {}) },
   )
   const agent = {
     id: SessionId(id),

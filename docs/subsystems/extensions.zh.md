@@ -12,6 +12,88 @@ extensions 子系统允许 agent（智能体）定义带版本的 Cordis 包、�
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxcollabstudio--collabstudioservice"></a>
+
+### `ctx.collabStudio` — `CollabStudioService`
+
+The `collabStudio` service surface other rows may use.
+
+```ts cordis-catalog
+/**
+ * List persisted collaboration projects.
+ * @returns persisted project records.
+ */
+listProjects(): Promise<unknown>
+
+/**
+ * Create one collaboration project from a user request.
+ * @param request - untrusted project creation input.
+ * @returns the created project record.
+ */
+createProject(request: unknown): Promise<ProjectRecord>
+
+/**
+ * Read one project together with its role and stage metadata.
+ * @param projectId - persisted project identifier.
+ * @returns project detail data.
+ */
+getProject(projectId: string): Promise<unknown>
+
+/**
+ * Start one project pipeline.
+ * @param projectId - persisted project identifier.
+ * @returns whether the pipeline was started.
+ */
+startProject(projectId: string): Promise<{ started: boolean; reason?: string }>
+
+/**
+ * Stop one running project pipeline.
+ * @param projectId - persisted project identifier.
+ * @returns whether an active pipeline was stopped.
+ */
+stopProject(projectId: string): Promise<{ stopped: boolean }>
+
+/**
+ * Delete one project after stopping any active run.
+ * @param projectId - persisted project identifier.
+ * @returns whether the project was deleted.
+ */
+deleteProject(projectId: string): Promise<{ deleted: boolean }>
+
+/**
+ * Read a bounded project event page.
+ * @param projectId - persisted project identifier.
+ * @param after - exclusive event cursor.
+ * @param limit - maximum number of events.
+ * @returns the event page and total count.
+ */
+events(projectId: string, after: number, limit: number): Promise<{ events: unknown[]; total: number }>
+
+/**
+ * List files generated for one project.
+ * @param projectId - persisted project identifier.
+ * @returns project-relative file paths.
+ */
+files(projectId: string): Promise<string[]>
+
+/**
+ * Read one bounded generated project file.
+ * @param projectId - persisted project identifier.
+ * @param path - project-relative file path.
+ * @returns file text and truncation status.
+ */
+readFile(projectId: string, path: string): Promise<{ text: string; truncated: boolean }>
+
+/**
+ * Report whether one project pipeline is active.
+ * @param projectId - persisted project identifier.
+ * @returns whether the project has an active pipeline.
+ */
+isRunning(projectId: string): boolean
+```
+
+Source: [`packages/web/collab-studio/src/index.ts`](../../packages/web/collab-studio/src/index.ts)
+
 <a id="ctxcordisinspect--cordisinspectregistryservice"></a>
 
 ### `ctx.cordisInspect` — `CordisInspectRegistryService`
@@ -273,6 +355,96 @@ publish(topic: string, payload: InspectorJsonValue, monotonicMs?: number): void
 ```
 
 Source: [`packages/experimental/inspector/src/index.ts`](../../packages/experimental/inspector/src/index.ts)
+
+<a id="ctxmodelbench--modelbenchservice"></a>
+
+### `ctx.modelBench` — `ModelBenchService`
+
+The `modelBench` service surface other rows may use.
+
+```ts cordis-catalog
+/**
+ * List persisted benchmark rounds.
+ * @returns persisted benchmark round records.
+ */
+listRounds(): Promise<unknown>
+
+/**
+ * Create one benchmark round from a user request.
+ * @param request - untrusted round creation input.
+ * @returns the created benchmark round.
+ */
+createRound(request: unknown): Promise<RoundRecord>
+
+/**
+ * Read one round together with its question material.
+ * @param roundId - persisted round identifier.
+ * @returns round detail data.
+ */
+getRound(roundId: string): Promise<unknown>
+
+/**
+ * Start question generation for one round.
+ * @param roundId - persisted round identifier.
+ * @returns whether generation was started.
+ */
+generateRound(roundId: string): Promise<{ started: boolean; reason?: string }>
+
+/**
+ * Start contestant execution for one round.
+ * @param roundId - persisted round identifier.
+ * @param request - untrusted contestant and judge selection input.
+ * @returns whether the contest was started.
+ */
+startRound(roundId: string, request: unknown): Promise<{ started: boolean; reason?: string }>
+
+/**
+ * Stop one running benchmark round.
+ * @param roundId - persisted round identifier.
+ * @returns whether an active round was stopped.
+ */
+stopRound(roundId: string): Promise<{ stopped: boolean }>
+
+/**
+ * Delete one round after stopping any active run.
+ * @param roundId - persisted round identifier.
+ * @returns whether the round was deleted.
+ */
+deleteRound(roundId: string): Promise<{ deleted: boolean }>
+
+/**
+ * Read a bounded round event page.
+ * @param roundId - persisted round identifier.
+ * @param after - exclusive event cursor.
+ * @param limit - maximum number of events.
+ * @returns the event page and total count.
+ */
+events(roundId: string, after: number, limit: number): Promise<{ events: unknown[]; total: number }>
+
+/**
+ * List files generated for one round.
+ * @param roundId - persisted round identifier.
+ * @returns round-relative file paths.
+ */
+files(roundId: string): Promise<string[]>
+
+/**
+ * Read one bounded generated round file.
+ * @param roundId - persisted round identifier.
+ * @param path - round-relative file path.
+ * @returns file text and truncation status.
+ */
+readFile(roundId: string, path: string): Promise<{ text: string; truncated: boolean }>
+
+/**
+ * Report whether one benchmark round is active.
+ * @param roundId - persisted round identifier.
+ * @returns whether the round has an active run.
+ */
+isRunning(roundId: string): boolean
+```
+
+Source: [`packages/web/model-bench/src/index.ts`](../../packages/web/model-bench/src/index.ts)
 
 <a id="cordis-events"></a>
 

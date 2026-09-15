@@ -1,17 +1,41 @@
+---
+description: "按 agent 记录的破甲模式评估插件，提供策略注入、持久投影、命令和可选的 TVD 验证。"
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-jailbreak-mode
 
 [English](README.md) | 中文
+
+## 概述
+
+`dsh-jailbreak-mode` 提供按 agent 记录的评估模式，用于红队安全测试。它拥有策略选择、提示词改写、可选的 TVD 脚手架、`/jailbreak` 命令，以及供客户端消费的会话投影。
+
+## 目录
+
+- [持久状态](#durable-state)
+- [模型与人类交互](#model-and-human-interactions)
+- [会话投影](#session-projection)
+- [内置策略](#built-in-strategies)
+- [配置](#configuration)
+- [Model Experience](#model-experience)
+- [已知限制与后续工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+-----
 
 按 agent（智能体）分别记录到日志的破甲（jailbreak）模式，用于红队安全评估：激活时，所选策略的指令块会追加到每个模型请求的系统提示词中，且每条被认领的用户消息在到达模型前会用该策略的前缀/后缀包装。`/jailbreak [off|strategy]` 命令负责进入、退出和切换策略。
 
 破甲模式是评估工具，不是执行方式的变更：它只为安全测试改写模型输入。沙箱模式和批准策略各自强制执行限制，且不读写破甲状态。
 
+<a id="durable-state"></a>
 ## 持久状态
 
 `jailbreak/mode`（`{ active: boolean, strategy: string }`）是一个仅存在于日志中、每次以完整值替换的 `SessionEventMap` 成员。`foldJailbreakMode(events)` 返回最后记录的 `{ active, strategy }` 对，如果没有则返回 `{ active: false, strategy: <默认> }`，因此恢复、fork 和压缩（compaction）都能直接从会话日志恢复破甲状态。UI 通过 `session/event` 观察已提交的切换。
 
 `ctx.jailbreakMode.set(agent, active, strategy?)` 会在 agent 空闲时立即追加独立的 `jailbreak/mode` 事件，因为下一个提示词之前不会运行轮内 pre-step。agent 运行时，该方法会保留待生效选择，直到下一个被接受的轮内 pre-step。返回值区分 `committed`、`queued`、表示反转的 `cancelled` 和 `noop`。`get(agent)` 返回 `{ active, strategy, pending? }`。初始与续步 pre-step 都会应用待生效选择；同一步骤的请求恢复重试会复用已冻结的 assembly，并将该选择保留到下一个被接受的轮内 pre-step。当最后记录的状态不同时，用户选择的变更会贡献一条插件来源的 `user/message` 通知（两条提交路径皆然）。
 
+<a id="model-and-human-interactions"></a>
 ## 模型与人类交互
 
 激活时，`jailbreak:policy` 会在提示词顺序 130 处渲染策略的 `system` 块，且每条被认领的用户消息会在请求组装前包装为 `前缀 + 原文 + 后缀`。工具结果消息永远不会被包装。未激活时不贡献 section 文本，也不做包装。
@@ -22,14 +46,17 @@
 
 Web 客户端使用该插件提供的 `/jailbreak` 命令；其他入口可以直接驱动同一服务，无需定义第二套 mode 词汇。
 
+<a id="session-projection"></a>
 ## 会话投影
 
 当组合挂载 `ctx.sessionProjections`（[`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.zh.md)）时，本包会在一个注入的子插件中注册 `jailbreak` 投影单元。该单元折叠两类事件：名为 `jailbreak` 且携带已记录 `args` 的 `command/run` 记录会设置目标状态（`off` → 未激活，已知策略 → 以该策略激活，无参数 → 以当前策略激活），`jailbreak/mode` 会提交已记录状态并清除该目标；其他任何事件都返回同一个状态引用。`view` 推导 `{ active, pending, strategy }`，其中 `pending` 仅在尚未落实的选择与已记录状态不同时为 true。该值完全由日志回放得出，因此 host 重启、其他标签页和冷读都能仅凭日志恢复它。key 由 `src/types.ts` 通过声明合并加入 `SessionProjectionMap`：host 消费方经 `./types` 获取，client 聚合经 `./client` 获取。未挂载注册表的组合不受影响。
 
+<a id="built-in-strategies"></a>
 ## 内置策略
 
 该包内置十一种公开且被广泛记载的破甲技术，用于可复现的安全评估：`dan`（Do Anything Now）、`developer-mode`、`stan`、`prefix-injection`、`persona`、`research-framing`、`authorized-ctf`（显式授权竞赛场景框定——回应模型的"范围/授权"顾虑，而非泛化的无限制人设，对合法安全训练成功率更高）、`evaluator`（元评估框架——会话按指令遵循保真度评分，拒绝、遗漏与免责声明记为评估失败）、`continuation`（文本续写框架——请求被框定为既有草稿的续写，而非可拒绝的新请求）、`gpt56-sol-unrestricted`（gpt-5.6-sol 无限制 v45——逐字内置 MDX-Tom/gpt-5.6-instruct 的 Codex 破甲提示词）和 `tvd-guard`（TVD Guard Validator——自循环工具链，把模型放进一个小型编码项目，其安全分类验证器真实运行，失败以编程错误回流而非拒绝）。每个策略都带有一个 `system` 块和一对 `prefix`/`suffix`；`tvd-guard` 额外携带 `tvd` 工具链。它们随包提供，只为了让部署方能够运行可复现的红队评估；禁用该插件即可彻底移除。
 
+<a id="configuration"></a>
 ## 配置
 
 ```yaml
@@ -46,6 +73,11 @@ Web 客户端使用该插件提供的 `/jailbreak` 命令；其他入口可以�
 - `validatorModel`（可选，默认空）：替换进脚手架 TVD 文件中 `{{validatorModel}}` 的分类模型名。`tvd-guard` 运行验证器需要它；未设置或为空时该策略降级为纯提示变体。
 
 策略即内置表；需要自定义模板的部署方可以扩展导出的表或打补丁。
+
+<a id="dev-note"></a>
+## 开发备注
+
+保持命令词汇、记录事件、投影 key、策略表和客户端控件同步。提示词可见行为发生变化时，必须同时更新会话事件约定和相应的记录会话快照。
 
 ## Model Experience
 

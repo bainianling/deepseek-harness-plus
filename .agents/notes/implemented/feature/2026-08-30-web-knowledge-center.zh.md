@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-Web 应用拥有只读 `/api/knowledge` 投影。`web-app` 使用有界的 `knowledgeTimeoutMs` 读取配置的 `hindsightUrl` 与 `hindsightBankId`，扁平化 Hindsight 知识树，并暴露 `/api/knowledge/snapshot` 与经过校验的 `/api/knowledge/pages/:id` 读取。快照携带来源身份与状态、文件夹、知识页摘要、来源标签、事实/文档/观察数量、归纳时间戳以及待处理或失败的操作数量。来源不可达或超时时返回结构化 `503`，不会挂起，也不会伪造一个空知识库。
+Web 应用拥有只读 `/api/knowledge` 投影。`web-app` 使用有界的 `knowledgeTimeoutMs` 读取配置的 `hindsightUrl` 与 `hindsightBankId`，扁平化 Hindsight 知识树，并暴露 `/api/knowledge/snapshot` 与经过校验的 `/api/knowledge/pages/:id` 读取。快照携带来源身份与状态、文件夹、知识页摘要、来源标签、事实/文档/观察数量、归纳时间戳以及待处理或失败的操作数量。来源不可达或超时时返回结构化 `503`，不会挂起，也不会伪造一个空知识库。何时启动本地 daemon 以及如何展示生命周期，由独立的[Hindsight 手动启动决策](2026-09-04-hindsight-manual-start.zh.md)负责。
 
 `KnowledgeHubApp` 只消费这份 DSH 自有契约。它提供健康指标、文件夹与标签筛选、本地文本搜索、知识页选择、安全 Markdown 渲染，并明确展示加载、空结果、生成中、待更新和离线状态。页面是面向运维的管理视图而不是编辑器：在 DSH 定义经过认证的写入语义之前，知识变更仍由 Hindsight 工具与 API 负责。长期项目知识被组织为“架构与边界”“组件地图”“工程规范”“运行与维护”分区；功能 initiative 继续保留在现有 `Initiatives` 分区。
 

@@ -70,7 +70,7 @@ root.render(<AppWithBrowserPanel />)
 
 **方法 B: 作为独立插件注册**
 
-创建一个插件入口文件 `packages/client/ui-browser-panel/src/client/register.tsx`：
+复用现有入口文件 `packages/client/ui-browser-panel/src/client/index.tsx`：
 
 ```tsx
 import { useEffect } from 'react'

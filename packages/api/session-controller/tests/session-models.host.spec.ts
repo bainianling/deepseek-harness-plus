@@ -1,8 +1,9 @@
 /**
  * Session Controller model-directory and selection behavior: dynamic provider grouping,
  * provider-local catalog failures, logged-selection restoration without stale
- * catalog injection, advisory pass-through models, and the prompt-assembly
- * boundary for a running selection change.
+ * catalog injection, advisory pass-through models, the prompt-assembly
+ * boundary for a running selection change, and the model-environment replay
+ * guard for mid-session selection changes.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -22,7 +23,7 @@ import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
 import { ApiSessionAgentController } from '../src/agent.ts'
 import { buildModelCatalog } from '../src/catalog.ts'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { createSessionTestRemote } from './test-remote.ts'
 
 function request<P>(payload: P): P {
@@ -83,6 +84,51 @@ const REASONING: LlmModelReasoningInfo = {
   defaultEffort: ReasoningEffortId('high'),
 }
 
+/** Adapter whose models declare an exact protocol/state environment. */
+function capableAdapter(
+  provider: string,
+  model: string,
+  protocol: string,
+  state: 'client-replay' | 'provider-managed',
+): LlmAdapter {
+  return new class extends CatalogAdapter {
+    override resolveModel(resolveProvider: string, resolveModel: string): Promise<LlmResolvedModelInfo> {
+      return Promise.resolve({
+        provider: resolveProvider,
+        id: resolveModel,
+        name: resolveModel,
+        capabilities: {
+          protocol,
+          state,
+          promptCaching: 'provider',
+          nativeCompaction: false,
+          background: false,
+          parallelToolCalls: true,
+        },
+      })
+    }
+  }('Capable', [{ provider, id: model, name: model }])
+}
+
+/** Append a recorded environment and a request header so history exists. */
+async function seedHistory(
+  agent: Agent,
+  remote: ReturnType<typeof createSessionTestRemote>,
+  provider: string,
+  model: string,
+): Promise<void> {
+  const current = expectValue(await remote.modelEnvironment({
+    provider,
+    model,
+    policy: { compaction: 'basic', background: 'foreground', parallelToolCalls: false },
+  }))
+  agent.session.append('model/environment', current.plan)
+  agent.session.append('request/header', {
+    header: { config: { provider, model } },
+    reason: 'initial',
+  })
+}
+
 async function harness(logged?: {
   provider: string
   model: string
@@ -95,7 +141,7 @@ async function harness(logged?: {
 }> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
-  await ctx.plugin(SystemPrompt, { persona: '' })
+  await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(AgentRegistry)
   ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', [
@@ -158,6 +204,123 @@ function currentSelection(ctx: Context, sessionId: SessionId) {
 }
 
 describe('Web session model selection', () => {
+  it('allows a protocol change after model-visible history exists on client-replay routes', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    })
+    ctx.llm.registerAdapter(['responses'], capableAdapter('responses', 'responses-model', 'responses', 'client-replay'))
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    await seedHistory(agent, remote, 'deepseek-official', 'deepseek-chat')
+
+    const selected = await remote.selectModel({
+      sessionId,
+      provider: 'responses',
+      model: 'responses-model',
+    })
+
+    expect(selected).toMatchObject({
+      ok: true,
+      value: { selected: { provider: 'responses', model: 'responses-model' } },
+    })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(1)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/environment')).toHaveLength(2)
+  })
+
+  it('allows a same-protocol model change after model-visible history exists', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    })
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    await seedHistory(agent, remote, 'deepseek-official', 'deepseek-chat')
+
+    const selected = await remote.selectModel({
+      sessionId,
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+
+    expect(selected).toMatchObject({
+      ok: true,
+      value: { selected: { provider: 'deepseek-official', model: 'deepseek-reasoner' } },
+    })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(1)
+  })
+
+  it('rejects a state change after model-visible history exists', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    })
+    ctx.llm.registerAdapter(['durable'], capableAdapter('durable', 'durable-model', 'responses', 'provider-managed'))
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    await seedHistory(agent, remote, 'deepseek-official', 'deepseek-chat')
+
+    const selected = await remote.selectModel({
+      sessionId,
+      provider: 'durable',
+      model: 'durable-model',
+    })
+
+    expect(selected).toMatchObject({
+      ok: false,
+      error: {
+        code: 'session/environment-conflict',
+        details: {
+          sessionId,
+          currentState: 'client-replay',
+          nextState: 'provider-managed',
+        },
+      },
+    })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(0)
+  })
+
+  it('rejects a protocol change between provider-managed routes after model-visible history exists', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    })
+    ctx.llm.registerAdapter(['durable'], capableAdapter('durable', 'durable-model', 'responses', 'provider-managed'))
+    ctx.llm.registerAdapter(['durable-chat'], capableAdapter('durable-chat', 'chat-model', 'chat', 'provider-managed'))
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    await seedHistory(agent, remote, 'durable', 'durable-model')
+
+    const selected = await remote.selectModel({
+      sessionId,
+      provider: 'durable-chat',
+      model: 'chat-model',
+    })
+
+    expect(selected).toMatchObject({
+      ok: false,
+      error: {
+        code: 'session/environment-conflict',
+        details: {
+          sessionId,
+          currentProtocol: 'responses',
+          nextProtocol: 'chat',
+          currentState: 'provider-managed',
+          nextState: 'provider-managed',
+        },
+      },
+    })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection')).toHaveLength(0)
+  })
+
   it('validates an ordered image batch before persisting any member', async () => {
     const { ctx, agent, sessionId } = await harness()
     const validateImage = vi.fn((_input: { data: Uint8Array }) => Promise.resolve())
@@ -301,7 +464,7 @@ describe('Web session model selection', () => {
       id: 'summary', role: 'user', source: { kind: 'plugin', plugin: 'compact' },
       content: [{ type: 'text', text: 'image summarized' }],
     } as never, {
-      surfaceOp: { op: 'replace', start: imageEvent.seq, end: imageEvent.seq },
+      surfaceOp: { op: 'replace', startSeq: imageEvent.seq, endSeq: imageEvent.seq },
       sourceEventSeqs: [imageEvent.seq],
     })
     ;(agent.inbox.nextTurn as UserMessage[]).push({
@@ -396,16 +559,57 @@ describe('Web session model selection', () => {
     ], {
       efforts: [{ id: ReasoningEffortId('high'), name: 'High', description: 'More thinking' }],
     }))
+    ctx.llm.registerAdapter(['responses'], new class extends CatalogAdapter {
+      override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+        return Promise.resolve({
+          provider,
+          id: model,
+          name: model,
+          capabilities: {
+            protocol: 'openai-responses',
+            state: 'provider-managed',
+            promptCaching: 'provider',
+            nativeCompaction: true,
+            background: true,
+            parallelToolCalls: true,
+          },
+        })
+      }
+    }('Responses', [{ provider: 'responses', id: 'responses-model', name: 'Responses Model' }]))
     ctx.llm.registerAdapter(['string-failure'], new class extends CatalogAdapter {
       override listModels(): Promise<readonly LlmModelInfo[]> {
         // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- non-Error provider normalization is the scenario.
         return Promise.reject('string catalog failure')
       }
     }('String Failure', []))
-    createSessionTestRemote(ctx, {
+    const remote = createSessionTestRemote(ctx, {
       defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
       cwd: '/tmp',
     })
+
+    const environment = expectValue(await remote.modelEnvironment({
+      provider: 'responses',
+      model: 'responses-model',
+      policy: { compaction: 'basic', background: 'foreground', parallelToolCalls: true },
+      overrides: { protocol: 'openai-responses' },
+    }))
+    expect(environment.plan).toMatchObject({
+      route: { provider: 'responses', model: 'responses-model' },
+      preset: 'default',
+      protocol: 'openai-responses',
+      state: 'provider-managed',
+      promptCaching: 'provider',
+      compaction: 'basic',
+      background: 'foreground',
+      parallelToolCalls: true,
+    })
+    const unavailable = await remote.modelEnvironment({
+      provider: 'missing-provider',
+      model: 'missing-model',
+      policy: { compaction: 'basic', background: 'foreground', parallelToolCalls: false },
+    })
+    expect(unavailable.ok).toBe(false)
+    if (!unavailable.ok) expect(remoteErrorOf(unavailable.error)?.code).toBe('model-environment/route-unavailable')
 
     const catalog = await buildModelCatalog(ctx)
     expect(catalog.groups).toEqual(expect.arrayContaining([
@@ -418,6 +622,22 @@ describe('Web session model selection', () => {
           name: 'Reasoning Model',
           reasoning: {
             efforts: [{ id: 'high', name: 'High', description: 'More thinking' }],
+          },
+        }],
+      },
+      {
+        id: 'responses',
+        name: 'Responses',
+        models: [{
+          id: 'responses-model',
+          name: 'Responses Model',
+          capabilities: {
+            protocol: 'openai-responses',
+            state: 'provider-managed',
+            promptCaching: 'provider',
+            nativeCompaction: true,
+            background: true,
+            parallelToolCalls: true,
           },
         }],
       },
@@ -665,7 +885,7 @@ describe('Web session model selection', () => {
     const savedRef = {
       attachmentId: 'saved-image', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
     }
-    ctx.provide('attachments', {
+    ctx.provide('attachments', Object.setPrototypeOf({
       saveImages: () => {
         if (saveMode === 'error') return Promise.reject(new Error('image store offline'))
         if (saveMode === 'remote') {
@@ -673,7 +893,7 @@ describe('Web session model selection', () => {
         }
         return Promise.resolve([savedRef])
       },
-    } as never)
+    }, AttachmentStore.prototype) as never)
     const followup = vi.fn()
     Object.assign(agent, { followup })
     const remote = createSessionTestRemote(ctx, {

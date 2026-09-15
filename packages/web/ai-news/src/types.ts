@@ -62,6 +62,44 @@ export interface NewsFeed {
   items: NewsItem[]
 }
 
+/** Raw deployment configuration accepted by the plugin row. */
+export interface Config {
+  /** Enable the scheduled crawler and Web routes. */
+  enabled?: boolean
+  /** Re-crawl when the store is older than this many hours. */
+  intervalHours?: number
+  /** Item cap kept in feed.json. */
+  maxItems?: number
+  /** Absolute data directory for feed and media files. */
+  dataDir?: string
+  /** Explicit proxy URL, empty for system-proxy detection, or `none` to disable. */
+  proxy?: string
+  /** Enabled crawler source groups. */
+  platforms?: NewsPlatform[]
+  /** X accounts read through the syndication timeline endpoint. */
+  xAccounts?: string[]
+  /** Extra AI relevance keywords appended to the built-in list. */
+  keywords?: string[]
+  /** Whole-crawl wall budget in milliseconds. */
+  crawlTimeoutMs?: number
+  /** Per-image download cap in bytes. */
+  maxImageBytes?: number
+  /** Items older than this many days are not admitted. */
+  maxAgeDays?: number
+  /** dsh-browser authProfile id holding the Douyin login state. */
+  douyinAuthProfileId?: string
+  /** Auto-translate English titles and summaries into Chinese. */
+  translateEnabled?: boolean
+  /** Environment variable holding the translation API key. */
+  translateApiKeyEnv?: string
+  /** OpenAI-compatible chat completions endpoint. */
+  translateBaseUrl?: string
+  /** Chat model used for translation. */
+  translateModel?: string
+  /** Max items translated per crawl run. */
+  translateMaxPerCrawl?: number
+}
+
 /** Normalized plugin configuration (see config.ts for defaults). */
 export interface ResolvedConfig {
   enabled: boolean

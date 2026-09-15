@@ -38,7 +38,7 @@ After startup you see a `dsh web:` line whose root URL carries a fresh process t
 
 ### Configuration
 
-Most users never set these; command-line flags feed the invocation-owned settings, while the Hindsight fields select the read-only source shown by the Knowledge section:
+Most users never set these; command-line flags feed the invocation-owned settings, while the Hindsight fields select the local daemon and read-only source shown by the Knowledge section:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -46,11 +46,20 @@ Most users never set these; command-line flags feed the invocation-owned setting
 | `printUrl` | `true` | Print the `dsh web:` URL line at startup |
 | `surfaceContext` | `true` | Give the agent GUI-orientation context and expose `DSH_WEB_URL` to its shell commands |
 | `trustedHosts` | `[]` | Extra hosts allowed to reach the GUI from the network |
-| `hindsightUrl` | `http://127.0.0.1:9077` | Local Hindsight API used by the Knowledge section |
+| `hindsightUrl` | `http://127.0.0.1:9077` | Local Hindsight API used by the Knowledge section and its health probe |
 | `hindsightBankId` | `coding-agent::deepseek-harness` | Hindsight bank projected into this GUI |
-| `knowledgeTimeoutMs` | `5000` | Timeout for each Hindsight read, from 100 to 30000 ms |
+| `knowledgeTimeoutMs` | `5000` | Timeout for each Hindsight read or health probe, from 100 to 30000 ms |
+| `hindsightProfile` | `dsh-local` | Trusted local profile passed to the fixed daemon command |
+| `hindsightCommand` | `hindsight-embed` | Trusted executable name or absolute path used for manual startup |
+| `hindsightStartTimeoutMs` | `240000` | Maximum wait for a manually started daemon to pass its health probe, from 10000 to 300000 ms |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) is the exhaustive source for every accepted field and its JSDoc.
+
+### Manual Hindsight startup
+
+Starting `dsh --profile web` does not launch Hindsight. Open the Knowledge section and select **Start Hindsight** when the local service is needed. The Host first adopts an already healthy `hindsightUrl`; otherwise it starts the configured executable with the fixed `-p <hindsightProfile> daemon start` arguments, polls `/health`, and shares concurrent requests so one Web process cannot launch duplicate daemons. The detached daemon is independent of Web plugin disposal and remains available for later sessions.
+
+When startup cannot complete, the Knowledge section keeps the rest of the GUI usable and shows a bounded, redacted diagnostic. `executable-missing`, `spawn-failed`, `process-failed`, and `timeout` identify the failure class. Install `hindsight-embed`, configure an absolute executable path when it is not on `PATH`, or inspect the profile's own logs before retrying. The browser only calls DSH-owned `/api/knowledge` routes; it cannot choose the executable, profile, arguments, or filesystem path.
 
 ### LAN access and trusted hosts
 
@@ -76,7 +85,7 @@ The bundle is one patch plus one runtime glue plugin. The storage stack and proj
 
 ### Patch semantics
 
-A patch replaces the targeted row's whole `config`, so each web row restates every key it owns: the persona, the `DSH_TOOLS_MODE` PTC mode opt-in, and the `session-query-sqlite` values on the base rows, then `insert` adds the web host rows, transport, and browser roster. The per-agent tool rows the base mounts process-wide are disabled here and the preset roster takes over; the reasoning for each host-plane versus preset-plane decision is inline in the patch.
+A patch replaces the targeted row's whole `config`, so each web row restates every key it owns: the persona prefix and suffix templates, the `DSH_TOOLS_MODE` PTC mode opt-in, and the `session-query-sqlite` values on the base rows, then `insert` adds the web host rows, transport, and browser roster. The per-agent tool rows the base mounts process-wide are disabled here and the preset roster takes over; the reasoning for each host-plane versus preset-plane decision is inline in the patch.
 
 ### Readiness
 
@@ -133,7 +142,7 @@ Read these pages when you want to go deeper into the shared core, the browser re
 
 #### What the model sees
 
-When `surfaceContext` is true, the `harness:source` section identifies the on-disk Harness implementation without claiming it is the working directory, and the `app:web-surface` global section (first-party order −800) orients the model to the GUI: the canonical local URL, the "this page" referent, the update contract (the reload receiver is always on; no-refresh reloads additionally need the `pnpm run dev:web` watcher), and the instruction not to start replacement servers. `DSH_WEB_URL` additionally appears in the managed bash environment with its description, resolved per invocation from the live server. When it is false, neither section nor the variable is registered.
+When `surfaceContext` is true, the `harness:source` section identifies the on-disk Harness implementation without claiming it is the working directory, and the `app:web-surface` global section (first-party order 10100, after reusable instructions) orients the model to the GUI: the canonical local URL, the "this page" referent, the update contract (the reload receiver is always on; no-refresh reloads additionally need the `pnpm run dev:web` watcher), and the instruction not to start replacement servers. `DSH_WEB_URL` additionally appears in the managed bash environment with its description, resolved per invocation from the live server. When it is false, neither section nor the variable is registered.
 
 #### Token effect
 
@@ -141,7 +150,7 @@ One source line and one prompt paragraph per session plus two managed-environmen
 
 #### KV Cache effect
 
-The prompt section sits near the system prompt's head and is stable for the life of the process (the port is a boot fact), so it does not invalidate the cache across turns.
+Source and Web sections follow first-party reusable instructions. Different checkout paths or local ports leave that preceding prefix unchanged when tools and configuration match; provider cache reuse is not guaranteed.
 
 ## Known Limitations and Deferred Work
 

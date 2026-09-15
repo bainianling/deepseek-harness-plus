@@ -241,9 +241,9 @@ describe('llm-deepseek real dynamic composition', () => {
     expect(await credentials.resolve(KEY_REF)).toEqual({ value: 'stored-by-ui', source: 'file' })
     expect(await credentials.describe(KEY_REF)).toEqual({ configured: true, source: 'file', writable: true })
     // Rotation still works after the restart, and the next request uses it.
-    await credentials.set(KEY_REF, 'rotated-after-restart')
+    await credentials.set(KEY_REF, 'test-token')
     await assemble(restarted.ctx, { model: 'deepseek-v4-flash', messages: [] })
-    expect(second.headers[0]?.authorization).toBe('Bearer rotated-after-restart')
+    expect(second.headers[0]?.authorization).toBe('Bearer test-token')
   })
 
   it('boots the same adapter on entry config alone, resolving the reference from the environment', async () => {

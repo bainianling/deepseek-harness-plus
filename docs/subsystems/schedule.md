@@ -2,7 +2,7 @@
 
 English | [中文](schedule.zh.md)
 
-Schedule owns durable reminders that return to the original live Session as ordinary later conversation turns. The [durable Schedule Agent Note](../../.agents/notes/implemented/feature/2026-08-05-durable-web-schedule.md) owns persistence, lifecycle, and active-state presentation, [conversational delivery](../../.agents/notes/implemented/simplification/2026-08-09-conversational-schedule-delivery.md) owns the no-receipt boundary, the [explicit time-zone boundary](../../.agents/notes/implemented/simplification/2026-08-09-explicit-schedule-time-zone.md) owns browser-local interpretation, and [bounded fixed-rate Schedule](../../.agents/notes/implemented/simplification/2026-08-09-bounded-fixed-rate-schedule.md) owns recurrence. This page records the durable and model-facing shapes from [`packages/schedule/schedule/src/types.ts`](../../packages/schedule/schedule/src/types.ts); the [package README](../../packages/schedule/schedule/README.md) owns composition, tool behavior, and the exact reminder framing.
+Schedule owns durable reminders that return to the original live Session as ordinary later conversation turns. The [durable Schedule Agent Note](../../.agents/notes/implemented/feature/2026-08-05-durable-web-schedule.md) owns persistence, lifecycle, and active-state presentation, and the [explicit time-zone boundary](../../.agents/notes/implemented/simplification/2026-08-09-explicit-schedule-time-zone.md) owns browser-local interpretation. This page records the durable and model-facing shapes from [`packages/schedule/schedule/src/types.ts`](../../packages/schedule/schedule/src/types.ts); the [package README](../../packages/schedule/schedule/README.md) owns composition, tool behavior, and the exact reminder framing.
 
 ## Durable records
 
@@ -21,6 +21,8 @@ interface AfterScheduleRecord {
   readonly afterSeconds: number
   /** Four-digit-year RFC 3339 UTC target. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 ```
 
@@ -35,6 +37,8 @@ interface AtScheduleRecord {
   readonly prompt: string
   /** Four-digit-year RFC 3339 UTC target. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 ```
 
@@ -51,6 +55,8 @@ interface EveryScheduleRecord {
   readonly everySeconds: number
   /** Earliest anchor-aligned occurrence not yet dispatched. */
   readonly scheduledAt: string
+  /** When true, defer execution to an idle window instead of firing at the exact target. */
+  readonly idlePriority?: boolean
 }
 ```
 
@@ -172,6 +178,8 @@ type ScheduleView = ScheduleRecord & {
   readonly state: ScheduleState
   /** Reminder delivery never leaves the owning session. */
   readonly deliveryMode: ScheduleDeliveryMode
+  /** Whether this task defers to idle windows. */
+  readonly idlePriority: boolean
 }
 ```
 

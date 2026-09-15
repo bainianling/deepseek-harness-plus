@@ -21,6 +21,7 @@ import { MediaCache, MEDIA_ROUTE_PREFIX } from './media.ts'
 import { NewsStore } from './store.ts'
 import type { TranslationLlm, TranslationModelSelection } from './translate.ts'
 import { MEDIA_FILE_PATTERN } from './media.ts'
+import type { Config } from './types.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'ai-news'
@@ -149,7 +150,7 @@ function readJsonBody(req: IncomingMessage, limit: number): Promise<Record<strin
  * @param ctx - plugin context carrying the webServer service.
  * @param rawConfig - the composition row config (coerced defensively).
  */
-export function apply(ctx: Context, rawConfig: unknown): void {
+export function apply(ctx: Context, rawConfig: Config): void {
   const config = resolveConfig(rawConfig)
   if (!config.enabled) return
   const webServer = ctx.get('webServer') as WebServerLike | undefined
@@ -159,8 +160,8 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   }
 
   const logger: NewsLogger = {
-    info: message => { ctx.logger.info(message) },
-    warn: error => { ctx.logger.warn(error) },
+    info: (message) => { ctx.logger.info(message) },
+    warn: (error) => { ctx.logger.warn(error) },
   }
   const llm = ctx.get('llm') as TranslationLlm | undefined
   const defaultModel = ctx.get('agentDefaultModel') as DefaultModelLike | undefined

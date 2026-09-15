@@ -143,7 +143,7 @@ interface TrainConfig {
 }
 
 const DEFAULT_PORT_URL = 'http://127.0.0.1:8918'
-const START_COMMAND = 'F:\\lora_train\\start-lora-service.cmd'
+const START_COMMAND = 'lora_train\\start-lora-service.cmd'
 const CFG_STORAGE_KEY = 'dsh.loraTrainCfg'
 
 const LR_SCHEDULERS = [

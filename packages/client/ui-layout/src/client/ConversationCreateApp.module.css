@@ -1,0 +1,545 @@
+/* 「对话创造」 pane: draft authoring column + the conversation-shaped preview.
+   Rides the shared module-platform tokens (like the model bench and collab
+   studio) so the section reads as native beside the work shell. `data-kind`
+   attributes carry the entry role to the accent rules instead of one class per
+   role, which keeps the TSX free of role-to-class maps. */
+
+.pane {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--dsw-alias-bg-base);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(1100px, 100% - 48px);
+  padding: 26px 0 28px;
+  min-height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: var(--dsw-alias-bg-module-platform);
+  border: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-primary-bluish);
+  flex-shrink: 0;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* Ghost: quiet chrome actions (reset / preview toggle) — border only, no fill
+   until hover. */
+.ghostButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ghostButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The one committing control in the pane. */
+.primaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-bg-module-platform));
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover, var(--dsw-alias-interactive-bg-hover));
+}
+
+.primaryButton:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Small square control used for the per-entry reorder / delete actions. */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+/* Failure / success / progress share one bar skeleton so the pane's state
+   never shifts the column while a creation is running. */
+.errorBar,
+.successBar,
+.progressBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.errorBar {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.errorBar strong {
+  font-weight: 600;
+}
+
+.errorBar span {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.successBar {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.progressBar {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.errorBar code,
+.successBar code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.errorSession {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+/* ---- draft authoring ---- */
+
+.entryList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+/* Role accent: the left edge names the entry's role at a glance, matching the
+   preview's avatars. */
+.entry[data-kind='user'] {
+  border-left: 3px solid var(--dsw-alias-label-primary-bluish);
+}
+
+.entry[data-kind='assistant'] {
+  border-left: 3px solid var(--dsw-alias-state-success-primary);
+}
+
+.entry[data-kind='tool-call'] {
+  border-left: 3px solid var(--dsw-alias-state-warn-primary);
+}
+
+.entry[data-kind='tool-result'] {
+  border-left: 3px solid var(--dsw-alias-border-l2);
+}
+
+.entryHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entryIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--dsw-specific-sidebar-nav-item-active);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.entrySpacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kindSelect {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kindSelect:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.input,
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--dsw-alias-label-primary-bluish);
+}
+
+.textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.insertRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.insertButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px dashed var(--dsw-alias-border-l1);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.insertButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ---- validation ---- */
+
+.issueList {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.issueTitle {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.issueList ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.issueList li {
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+/* ---- footer / creation bar ---- */
+
+.createBar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.createBar .field {
+  min-width: 220px;
+}
+
+.groupEmpty {
+  margin: 0;
+  align-self: center;
+  font-size: 11px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.planSummary {
+  align-self: center;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- conversation-shaped preview ---- */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.previewRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.previewAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-module-platform);
+  border: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.previewRow[data-kind='user'] .previewAvatar {
+  color: var(--dsw-alias-label-primary-bluish);
+}
+
+.previewRow[data-kind='assistant'] .previewAvatar {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.previewRow[data-kind='tool-call'] .previewAvatar,
+.previewRow[data-kind='tool-result'] .previewAvatar {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.previewBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 9px 11px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.previewMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.previewIndex {
+  font-variant-numeric: tabular-nums;
+}
+
+.previewText {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Tool results read as machine output: monospace, quieter than a message. */
+.toolResult {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.toolBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toolName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.toolArgs {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.toolCallId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}

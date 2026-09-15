@@ -4,6 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
+import { HindsightLifecycle, type HindsightLifecycleSnapshot } from './hindsight.ts'
 
 /** Configuration required by the Hindsight knowledge projection. */
 export interface KnowledgeSourceConfig {
@@ -13,6 +14,12 @@ export interface KnowledgeSourceConfig {
   hindsightBankId: string
   /** Maximum duration of one upstream request. */
   knowledgeTimeoutMs: number
+  /** Local Hindsight profile passed to the fixed daemon command. */
+  hindsightProfile: string
+  /** Trusted executable name or absolute path for manual daemon startup. */
+  hindsightCommand: string
+  /** Bounded wait for the daemon to become healthy after a manual start. */
+  hindsightStartTimeoutMs: number
 }
 
 interface HindsightFolderNode {
@@ -101,10 +108,180 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload)
 }
 
+type KnowledgeRequestRejection = 401 | 403 | undefined
+
+type RequestRejection = (req: IncomingMessage) => KnowledgeRequestRejection
+
+const REQUEST_BODY_TIMEOUT_MS = 5_000
+const REQUEST_BODY_DRAIN_MAX_BYTES = 64 * 1024
+const REQUEST_STREAM_CLEANUP_GRACE_MS = 1_000
+
+function chunkByteLength(chunk: unknown): number {
+  if (typeof chunk === 'string') return Buffer.byteLength(chunk)
+  if (Buffer.isBuffer(chunk)) return chunk.byteLength
+  if (chunk instanceof Uint8Array) return chunk.byteLength
+  return 0
+}
+
+function destroyRequest(req: IncomingMessage): void {
+  try { req.destroy() } catch { /* best effort after an oversized or stalled body */ }
+}
+
+function lifecyclePayload(config: KnowledgeSourceConfig, state: HindsightLifecycleSnapshot): Record<string, unknown> {
+  return {
+    ...state,
+    error: state.message,
+    source: {
+      kind: 'hindsight',
+      status: state.status,
+      bankId: config.hindsightBankId,
+      readOnly: true,
+    },
+  }
+}
+
+function rejectRequest(req: IncomingMessage, res: ServerResponse, requestRejection: RequestRejection): boolean {
+  const rejection = requestRejection(req)
+  if (rejection === undefined) return false
+  drainRequest(req)
+  res.writeHead(rejection)
+  res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+  return true
+}
+
+function drainRequest(req: IncomingMessage): void {
+  if (typeof req.resume !== 'function' || req.readableEnded) return
+  let settled = false
+  let bytes = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let cleanupGraceTimer: ReturnType<typeof setTimeout> | undefined
+  const cleanup = (): void => {
+    if (timer !== undefined) clearTimeout(timer)
+    if (cleanupGraceTimer !== undefined) clearTimeout(cleanupGraceTimer)
+    req.off('data', onData)
+    req.off('end', onEnd)
+    req.off('aborted', onAborted)
+    req.off('close', onClose)
+    req.off('error', onError)
+  }
+  const finish = (destroy = false, waitForClose = false): void => {
+    if (settled) return
+    settled = true
+    if (timer !== undefined) clearTimeout(timer)
+    req.off('data', onData)
+    req.off('end', onEnd)
+    req.off('aborted', onAborted)
+    // Arm the bounded fallback before destroy: some stream implementations emit
+    // `close` synchronously from destroy(), and that close must be able to clear
+    // the fallback rather than leaving a timer behind.
+    if (waitForClose) cleanupGraceTimer = setTimeout(cleanup, REQUEST_STREAM_CLEANUP_GRACE_MS)
+    if (destroy) destroyRequest(req)
+    // Keep both close and error listeners until the stream closes. This covers
+    // a late socket error after an early rejection or forced body destruction.
+    if (!waitForClose) cleanup()
+  }
+  const onData = (chunk: unknown): void => {
+    bytes += chunkByteLength(chunk)
+    if (bytes > REQUEST_BODY_DRAIN_MAX_BYTES) finish(true, true)
+  }
+  const onEnd = (): void => { finish(false, true) }
+  const onAborted = (): void => { finish(false, true) }
+  const onClose = (): void => {
+    if (settled) cleanup()
+    else finish(false)
+  }
+  const onError = (): void => { finish(false, true) }
+  req.on('data', onData)
+  req.once('end', onEnd)
+  req.once('aborted', onAborted)
+  req.once('close', onClose)
+  req.on('error', onError)
+  timer = setTimeout(() => { finish(true, true) }, REQUEST_BODY_TIMEOUT_MS)
+  try { req.resume() } catch { onError() }
+}
+
+/** Resolve only after the request stream proves that no body bytes arrived. */
+function requestBodyIsEmpty(req: IncomingMessage): Promise<boolean> {
+  const transferEncoding = req.headers['transfer-encoding']
+  if (transferEncoding !== undefined) {
+    drainRequest(req)
+    return Promise.resolve(false)
+  }
+  const contentLength = req.headers['content-length']
+  if (contentLength !== undefined) {
+    if (Array.isArray(contentLength) || !/^\d+$/u.test(contentLength) || Number(contentLength) !== 0) {
+      drainRequest(req)
+      return Promise.resolve(false)
+    }
+    return Promise.resolve(true)
+  }
+  if (req.readableEnded) return Promise.resolve(true)
+  return new Promise(resolve => {
+    let hasData = false
+    let bytes = 0
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let cleanupGraceTimer: ReturnType<typeof setTimeout> | undefined
+    const cleanup = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      if (cleanupGraceTimer !== undefined) clearTimeout(cleanupGraceTimer)
+      req.off('data', onData)
+      req.off('end', onEnd)
+      req.off('aborted', onAborted)
+      req.off('close', onClose)
+      req.off('error', onError)
+    }
+    const finish = (empty: boolean, destroy = false, waitForClose = false): void => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      req.off('data', onData)
+      req.off('end', onEnd)
+      req.off('aborted', onAborted)
+      // Arm the bounded fallback before destroy: some stream implementations emit
+      // `close` synchronously from destroy(), and that close must be able to clear
+      // the fallback rather than leaving a timer behind.
+      if (waitForClose) cleanupGraceTimer = setTimeout(cleanup, REQUEST_STREAM_CLEANUP_GRACE_MS)
+      if (destroy) destroyRequest(req)
+      // Resolve immediately, but keep cleanup listeners until close when the
+      // stream was aborted/destroyed so late errors remain handled.
+      if (!waitForClose) cleanup()
+      resolve(empty)
+    }
+    const onData = (chunk: unknown): void => {
+      hasData = true
+      bytes += chunkByteLength(chunk)
+      if (bytes > REQUEST_BODY_DRAIN_MAX_BYTES) finish(false, true, true)
+    }
+    const onEnd = (): void => { finish(!hasData, false, true) }
+    const onAborted = (): void => { finish(false, false, true) }
+    const onClose = (): void => {
+      if (settled) cleanup()
+      else finish(false)
+    }
+    const onError = (): void => { finish(false, false, true) }
+    req.on('data', onData)
+    req.once('end', onEnd)
+    req.once('aborted', onAborted)
+    req.once('close', onClose)
+    req.on('error', onError)
+    timer = setTimeout(() => { finish(false, true, true) }, REQUEST_BODY_TIMEOUT_MS)
+    try { req.resume() } catch { onError() }
+  })
+}
+
 function sourceUrl(config: KnowledgeSourceConfig, path: string): URL {
   const base = config.hindsightUrl.endsWith('/') ? config.hindsightUrl : `${config.hindsightUrl}/`
   const bank = encodeURIComponent(config.hindsightBankId)
   return new URL(`v1/default/banks/${bank}/${path}`, base)
+}
+
+async function releaseResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // A body may already be consumed or aborted; this is best-effort cleanup.
+  }
 }
 
 async function readHindsight<T>(config: KnowledgeSourceConfig, path: string): Promise<T> {
@@ -112,8 +289,15 @@ async function readHindsight<T>(config: KnowledgeSourceConfig, path: string): Pr
     headers: { accept: 'application/json' },
     signal: AbortSignal.timeout(config.knowledgeTimeoutMs),
   })
-  if (!response.ok) throw new Error(`Hindsight ${response.status} ${response.statusText}`)
-  return await response.json() as T
+  if (!response.ok) {
+    await releaseResponseBody(response)
+    throw new Error(`Hindsight ${response.status} ${response.statusText}`)
+  }
+  try {
+    return await response.json() as T
+  } finally {
+    await releaseResponseBody(response)
+  }
 }
 
 function flattenTree(tree: HindsightTree): FlatTree {
@@ -161,12 +345,67 @@ function upstreamError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Register the DSH-owned read projection consumed by the knowledge center. */
-export function registerKnowledgeRoutes(ctx: Context, config: KnowledgeSourceConfig): void {
-  ctx.effect(() => ctx.webServer.register({
+/** Register the DSH-owned read projection and local lifecycle controls. */
+export function registerKnowledgeRoutes(
+  ctx: Context,
+  config: KnowledgeSourceConfig,
+  isLocalControlRequest: (req: IncomingMessage) => boolean,
+  requestRejection: RequestRejection,
+): void {
+  const lifecycle = new HindsightLifecycle(config)
+  const webServer = ctx.webServer
+  ctx.effect(() => () => { lifecycle.dispose() }, 'web-app: hindsight lifecycle')
+
+  const guarded = (handler: (req: IncomingMessage, res: ServerResponse) => void): ((req: IncomingMessage, res: ServerResponse) => void) => {
+    return (req, res) => {
+      if (rejectRequest(req, res, requestRejection)) return
+      handler(req, res)
+    }
+  }
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/api/knowledge/status',
+    handler: guarded((req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        writeJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+      void lifecycle.status().then((state) => {
+        writeJson(res, 200, lifecyclePayload(config, state))
+      })
+    }),
+  }), 'web-app: knowledge status route')
+
+  ctx.effect(() => webServer.register({
+    kind: 'exact',
+    path: '/api/knowledge/start',
+    handler: guarded((req, res) => {
+      if (req.method !== 'POST' || !isLocalControlRequest(req)) {
+        // Finish consuming an otherwise rejected request so a keep-alive
+        // connection cannot carry unread bytes into the next route.
+        drainRequest(req)
+        res.writeHead(403)
+        res.end('forbidden')
+        return
+      }
+      void requestBodyIsEmpty(req).then(empty => {
+        if (!empty) {
+          writeJson(res, 400, { error: 'request body must be empty' })
+          return
+        }
+        const state: HindsightLifecycleSnapshot = lifecycle.requestStart()
+        writeJson(res, state.status === 'starting' ? 202 : state.status === 'online' ? 200 : 503, lifecyclePayload(config, state))
+      }).catch(() => {
+        writeJson(res, 400, { error: 'invalid request body' })
+      })
+    }),
+  }), 'web-app: knowledge start route')
+
+  ctx.effect(() => webServer.register({
     kind: 'exact',
     path: '/api/knowledge/snapshot',
-    handler: (req, res) => {
+    handler: guarded((req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         writeJson(res, 405, { error: 'method not allowed' })
         return
@@ -208,13 +447,13 @@ export function registerKnowledgeRoutes(ctx: Context, config: KnowledgeSourceCon
           source: { kind: 'hindsight', status: 'offline', bankId: config.hindsightBankId, readOnly: true },
         })
       })
-    },
+    }),
   }), 'web-app: knowledge snapshot route')
 
-  ctx.effect(() => ctx.webServer.register({
+  ctx.effect(() => webServer.register({
     kind: 'prefix',
     path: '/api/knowledge/pages',
-    handler: (req: IncomingMessage, res: ServerResponse) => {
+    handler: guarded((req: IncomingMessage, res: ServerResponse) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         writeJson(res, 405, { error: 'method not allowed' })
         return
@@ -241,6 +480,6 @@ export function registerKnowledgeRoutes(ctx: Context, config: KnowledgeSourceCon
         .catch((error: unknown) => {
           writeJson(res, 503, { error: upstreamError(error) })
         })
-    },
+    }),
   }), 'web-app: knowledge page route')
 }

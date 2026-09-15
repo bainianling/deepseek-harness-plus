@@ -49,6 +49,18 @@ class ResizeObserverStub {
 
 let frameWidth = 1920
 
+/**
+ * Injected creation capability stub. The frame only hands it to the
+ * conversation-create pane, so every spec outside that pane never calls it;
+ * `listOptions` resolves so the pane's own mount effect settles.
+ */
+const createConversationStub: AppFrameProps['createConversation'] = {
+  create: () => Promise.reject(new Error('createConversation.create is not exercised by AppFrame specs')),
+  listOptions: () => Promise.resolve({
+    presets: [], providers: [], routableProviders: [], failures: [],
+  }),
+}
+
 /** Test-local selector hook over a framework-neutral store instance. */
 function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapshot: () => T }) {
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
@@ -99,6 +111,7 @@ function mountFrame() {
       useSessions={useSessions}
       useSessionPendingInteraction={useSessionPendingInteraction}
       useWorkspaces={((sel: (s: WorkspaceSnapshot) => unknown) => sel(workspaceState)) as never}
+      createConversation={createConversationStub}
       SessionProvider={SessionProviderStub}
       t={key => key === 'brand.localBuild' ? 'DSH Local Build' : key}
     />
@@ -369,15 +382,36 @@ describe('AppFrame — nav rail sections', () => {
     act(() => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   }
 
-  it('renders the rail with nine sections and work active by default', () => {
+  it('renders the rail with ten sections and work active by default', () => {
     const { frame } = mountFrame()
     expect(frame.style.gridTemplateColumns).toBe(`${String(NAVRAIL_WIDTH)}px minmax(0, 1fr)`)
     expect(frame.getAttribute('data-nav-section')).toBe('work')
     const items = navItems(frame)
-    expect(items).toHaveLength(9)
-    expect(items.map(item => item.dataset.section)).toEqual(['work', 'terminal', 'voice', 'news', 'lora', 'collab', 'bench', 'knowledge', 'market'])
+    expect(items).toHaveLength(10)
+    expect(items.map(item => item.dataset.section)).toEqual(['work', 'conversationCreate', 'terminal', 'voice', 'news', 'lora', 'collab', 'bench', 'knowledge', 'market'])
     expect(items[0]!.hasAttribute('data-active')).toBe(true)
     expect(items[1]!.hasAttribute('data-active')).toBe(false)
+  })
+
+  it('exposes the conversation-create section under its own label', () => {
+    const { frame } = mountFrame()
+    const item = frame.querySelector('[data-section="conversationCreate"]')
+    expect(item?.getAttribute('aria-label')).toBe('nav.conversationCreate')
+  })
+
+  it('the conversation-create section renders its pane against the injected capability', async () => {
+    const { frame } = mountFrame()
+    await act(async () => {
+      clickNav(frame, 'conversationCreate')
+      await Promise.resolve()
+    })
+    expect(frame.getAttribute('data-nav-section')).toBe('conversationCreate')
+    expect(workShell(frame).hasAttribute('data-nav-hidden')).toBe(true)
+    expect(window.localStorage.getItem('dsh.navSection')).toBe('conversationCreate')
+    // The pane is a real region keyed on the same nav label, not a placeholder.
+    const pane = frame.querySelector('[role="region"][aria-label="nav.conversationCreate"]')
+    expect(pane).not.toBeNull()
+    expect(frame.querySelector('[class*="placeholderPane"]')).toBeNull()
   })
 
   it('switching to a non-work section hides the work shell without unmounting it', () => {
@@ -705,6 +739,18 @@ describe('AppFrame — nav rail sections', () => {
   it('the knowledge section renders the knowledge center without unmounting work', async () => {
     const fetchMock = vi.fn(async (input: string) => {
       const url = String(input)
+      if (url === '/api/knowledge/status') {
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'online',
+            errorCode: null,
+            message: null,
+            startedAt: '2026-08-30T00:00:00Z',
+            source: { kind: 'hindsight', bankId: 'coding-agent::deepseek-harness', readOnly: true },
+          }),
+        }
+      }
       if (url === '/api/knowledge/snapshot') {
         return {
           ok: true,
@@ -752,6 +798,108 @@ describe('AppFrame — nav rail sections', () => {
     expect(frame.textContent).toContain('Architecture guide')
     expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/snapshot', { cache: 'no-store' })
     expect(window.localStorage.getItem('dsh.navSection')).toBe('knowledge')
+  })
+
+  it('keeps Knowledge offline until an explicit start, then polls to online', async () => {
+    let statusCalls = 0
+    let startCalls = 0
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = String(input)
+      if (url === '/api/knowledge/status') {
+        statusCalls++
+        const state = statusCalls === 1
+          ? { status: 'offline', errorCode: null, message: null, startedAt: null }
+          : statusCalls === 2
+            ? { status: 'starting', errorCode: null, message: null, startedAt: null }
+            : { status: 'online', errorCode: null, message: null, startedAt: '2026-08-30T00:00:00Z' }
+        return {
+          ok: true,
+          json: async () => ({
+            ...state,
+            source: { kind: 'hindsight', bankId: 'coding-agent::deepseek-harness', readOnly: true },
+          }),
+        }
+      }
+      if (url === '/api/knowledge/start') {
+        startCalls++
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'starting',
+            errorCode: null,
+            message: null,
+            startedAt: null,
+            source: { kind: 'hindsight', bankId: 'coding-agent::deepseek-harness', readOnly: true },
+          }),
+        }
+      }
+      if (url === '/api/knowledge/snapshot') {
+        return {
+          ok: true,
+          json: async () => ({
+            source: { kind: 'hindsight', status: 'online', bankId: 'coding-agent::deepseek-harness', readOnly: true, syncedAt: '2026-08-30T00:00:00Z' },
+            folders: [{ id: 'kf-1', name: 'Architecture', parentId: null, depth: 0, path: ['Architecture'], pageCount: 1 }],
+            pages: [{ id: 'kp-1', name: 'Architecture guide', description: 'System boundaries', folderId: 'kf-1', folderPath: ['Architecture'], tags: [], updatedAt: '2026-08-30T00:00:00Z', stale: false, managed: false }],
+            stats: {
+              facts: 1, links: 2, documents: 3, observations: 4,
+              pendingOperations: 0, failedOperations: 0,
+              pendingConsolidation: 0, failedConsolidation: 0,
+              lastConsolidatedAt: null, lastMemoryWriteAt: null,
+              factsByType: {}, operationsByStatus: {},
+            },
+            tags: [],
+          }),
+        }
+      }
+      if (url === '/api/knowledge/pages/kp-1') {
+        return { ok: true, json: async () => ({ page: { id: 'kp-1', name: 'Architecture guide', type: 'knowledge-page', description: 'System boundaries', tags: [], timestamp: '2026-08-30T00:00:00Z', body: '## Boundaries', markdown: '' } }) }
+      }
+      return { ok: false, status: 404, json: async () => ({ error: 'unexpected route' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { frame } = mountFrame()
+    clickNav(frame, 'knowledge')
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const panel = frame.querySelector('[class*="daemonPanel"]')
+    if (!(panel instanceof HTMLElement)) throw new Error('missing daemon panel')
+    expect(panel.textContent).toContain('knowledge.daemon.offline')
+    const startButton = panel.querySelector('button')
+    if (!(startButton instanceof HTMLButtonElement)) throw new Error('missing Hindsight start button')
+    act(() => {
+      startButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      startButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(startCalls).toBe(1)
+    expect(panel.textContent).toContain('knowledge.daemon.starting')
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(statusCalls).toBe(2)
+    await act(async () => {
+      vi.advanceTimersByTime(1_000)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(statusCalls).toBe(3)
+    expect(frame.textContent).toContain('Architecture guide')
+    expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/start', { method: 'POST', cache: 'no-store' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/snapshot', { cache: 'no-store' })
   })
 
   it('the skill market renders the searchable catalog without unmounting work', async () => {

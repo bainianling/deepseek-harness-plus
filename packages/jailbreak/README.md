@@ -1,3 +1,8 @@
+---
+description: "Package map for the logged jailbreak-mode evaluation capability: strategy injection, durable state, commands, and session projection."
+kind: "package-group"
+---
+
 # jailbreak/ — red-team jailbreak mode
 
 English | [中文](README.zh.md)

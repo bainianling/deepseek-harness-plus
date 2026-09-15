@@ -202,6 +202,28 @@ function reasoningInfo(
   }
 }
 
+/**
+ * Describe only execution features the pi-ai adapter currently implements.
+ * Native Responses state, background requests, and native compaction remain
+ * unavailable because this adapter replays the harness history on every call.
+ * @param model - resolved pi-ai model descriptor.
+ * @param profile - route profile that controls prompt-cache behavior.
+ * @returns exact-route execution capabilities.
+ */
+function modelCapabilities(
+  model: Model<Api>,
+  profile: ResolvedPiAiProviderProfile,
+): NonNullable<LlmResolvedModelInfo['capabilities']> {
+  return {
+    protocol: model.api,
+    state: 'client-replay',
+    promptCaching: profile.cacheRetention === 'none' ? 'none' : 'provider',
+    nativeCompaction: false,
+    background: false,
+    parallelToolCalls: true,
+  }
+}
+
 /** Merge deployment headers while removing case-insensitive attribution collisions. */
 function requestHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
   const attribution = attributionHeaders()
@@ -257,7 +279,9 @@ export class PiAiAdapter extends LlmAdapter {
     const profiles = this.config.profiles()
     if (this.snapshot?.profiles === profiles) return this.snapshot
     const models: MutableModels = createModels(this.config.auth)
-    for (const profile of profiles.values()) models.setProvider(profile.piProvider)
+    for (const profile of profiles.values()) {
+      if (profile.piProvider !== undefined) models.setProvider(profile.piProvider)
+    }
     this.snapshot = { profiles, models }
     return this.snapshot
   }
@@ -273,7 +297,10 @@ export class PiAiAdapter extends LlmAdapter {
 
   /** The configured descriptor for one exact route/model pair within one snapshot. */
   private modelOf(snapshot: PiAiSnapshot, provider: string, model: string): Model<Api> {
-    this.profileOf(snapshot, provider)
+    const profile = this.profileOf(snapshot, provider)
+    const failure = profile.modelErrors.get(model)
+      ?? (profile.piProvider === undefined ? profile.catalogError : undefined)
+    if (failure !== undefined) throw new LlmError(failure, 'INVALID_CONFIG')
     const resolved = snapshot.models.getModel(provider, model)
     if (resolved === undefined) {
       throw new LlmError(`pi-ai provider "${provider}" has no configured model "${model}"`, 'UNKNOWN_MODEL')
@@ -330,6 +357,7 @@ export class PiAiAdapter extends LlmAdapter {
       inputModalities: [...resolvedModel.input],
       context: { contextWindow: resolvedModel.contextWindow },
       ...configuredMaxTokens === undefined ? {} : { defaultMaxTokens: configuredMaxTokens },
+      capabilities: modelCapabilities(resolvedModel, profile),
       ...reasoningInfo(resolvedModel, defaultLevel),
     }
   }
@@ -409,13 +437,20 @@ export class PiAiAdapter extends LlmAdapter {
         // cache-enabled OpenAI payload by its deterministic static prefix so
         // equivalent sessions can share a provider-side prompt cache.
         onPayload: (payload) => {
-          if (typeof payload !== 'object' || payload === null || !Object.hasOwn(payload, 'prompt_cache_key')) return payload
-          const request = payload as Record<string, unknown>
-          if (request.prompt_cache_key === undefined) return payload
+          // Deployment repetition penalty: completions-family bodies take the
+          // extra field; other protocols reject unknown fields and never see it.
+          const penalized = profile.repetitionPenalty !== undefined
+            && model.api === 'openai-completions'
+            && typeof payload === 'object' && payload !== null
+            ? { ...payload, repetition_penalty: profile.repetitionPenalty }
+            : payload
+          if (typeof penalized !== 'object' || penalized === null || !Object.hasOwn(penalized, 'prompt_cache_key')) return penalized
+          const request = penalized as Record<string, unknown>
+          if (request.prompt_cache_key === undefined) return penalized
           return { ...request, prompt_cache_key: promptCacheKey(model, context) }
         },
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

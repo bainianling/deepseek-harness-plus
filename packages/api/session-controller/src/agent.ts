@@ -8,13 +8,22 @@ import type {
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmCallConfig, LlmResolvedModelInfo, Message, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
-import type { ModelSelection } from './types.ts'
+import {
+  DEFAULT_MODEL_ENVIRONMENT_POLICY,
+  ModelEnvironmentError,
+  resolveModelEnvironment,
+} from './environment.ts'
+import type {
+  DualModelPlanSkipReason, ModelEnvironmentPlan, ModelEnvironmentPolicy, ModelRoles, ModelSelection,
+} from './types.ts'
 
 /** Cold Session identity absent from persistence. */
 export class ApiSessionNotFound extends Error {}
@@ -68,6 +77,38 @@ export type ApiSessionAgentResult =
 type InstalledSelection = ModelSelectionRef & {
   current: AgentModelSelection
   consume(provider: string, model: string, reasoningEffort: string | undefined): boolean
+}
+
+/** Per-Agent dual-model role state installed beside the ordinary selection. */
+interface InstalledRoles {
+  /** Roles captured by the latest prompt assembly, consumed per step. */
+  active: ModelRoles | undefined
+}
+
+/** Upper bound for one thinking-model plan injected into the worker request. */
+const PLAN_MAX_CHARS = 24_000
+/** Wall-clock budget for one thinking-model planning call. */
+const PLAN_CALL_TIMEOUT_MS = 180_000
+/** Worker-facing framing for one thinking-model plan. */
+const PLAN_FRAME: string = [
+  '<dual-model-plan>',
+  'A planning model produced the plan below for the current user request.',
+  'Follow it to complete the task; it is advisory and may be corrected by newer evidence.',
+  '</dual-model-plan>',
+].join('\n')
+
+/** Structured skip classification for the durable record. */
+type PlanSkipCode = DualModelPlanSkipReason
+
+/** Human-readable reason text for one finish kind (merge-extensible vocabulary). */
+function describeFinishReason(finish: string): string {
+  switch (finish) {
+    case 'max-tokens': return 'the planning output exhausted its token budget'
+    case 'aborted': return 'the planning call was aborted'
+    case 'error': return 'the model stream reported an error'
+    case 'tool-calls': return 'the planning model produced tool calls instead of a plan'
+    default: return 'the planning stream ended unusually'
+  }
 }
 
 /**
@@ -141,10 +182,14 @@ export class ApiSessionAgentController {
   private readonly resumes = new Map<SessionId, Promise<Agent>>()
   private readonly creations = new Map<SessionId, Promise<Agent>>()
   private readonly selections = new WeakMap<Agent, InstalledSelection>()
+  private readonly roles = new WeakMap<Agent, InstalledRoles>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
-  constructor(private readonly ctx: Context) {
+  constructor(
+    private readonly ctx: Context,
+    private readonly environmentPolicy: ModelEnvironmentPolicy = DEFAULT_MODEL_ENVIRONMENT_POLICY,
+  ) {
     ctx.typert.lookups.configure('agent', async (sessionId: SessionId) => {
       const found = await this.resolveAgent(sessionId)
       if ('error' in found) throw found.error
@@ -313,6 +358,10 @@ export class ApiSessionAgentController {
       },
       assembled: undefined,
     }
+    // Roles listeners must wrap the selection listeners: registering first
+    // makes the roles request replacement the outer layer, so the worker
+    // route wins over the ordinary selection route for the same step.
+    this.rolesFor(agent)
     installModelSelection(agent.ctx, selection)
     this.selections.set(agent, selection)
     return selection
@@ -326,6 +375,252 @@ export class ApiSessionAgentController {
   selectForNextRequest(agent: Agent, selection: AgentModelSelection): void {
     agent.session.append('model/selection', selection)
     this.selectionFor(agent).current = selection
+  }
+
+  /**
+   * Append the immutable environment selected for a later model request.
+   * @param agent - live Agent that owns the Session log.
+   * @param plan - detached plan already validated against the exact route.
+   */
+  selectEnvironmentForNextRequest(agent: Agent, plan: ModelEnvironmentPlan): void {
+    agent.session.append('model/environment', plan)
+  }
+
+  /**
+   * Install or return the Session-local dual-model roles used by pre-step
+   * planning and request routing.
+   * @param agent - live Agent that owns the roles.
+   * @returns the installed per-agent roles state.
+   */
+  rolesFor(agent: Agent): InstalledRoles {
+    const installed = this.roles.get(agent)
+    if (installed !== undefined) return installed
+    const created: InstalledRoles = { active: undefined }
+    this.roles.set(agent, created)
+    this.installDualModelRoles(agent)
+    return created
+  }
+
+  /**
+   * Couple durable model roles to the Agent-scoped loop extension points.
+   * `system-prompt/assemble` snapshots the durable roles for every step, and
+   * the request listener applies the worker route from that snapshot —
+   * mirroring how {@link installModelSelection} couples the ordinary
+   * selection. The request listener runs OUTSIDE the model-selection
+   * listener (registered after it on the same agent context), so its
+   * replacement wins for the worker route. Planning happens at the first
+   * step of each turn: the thinking model sees the durable history plus the
+   * claimed batch, and its plan enters the step as a durable plugin-sourced
+   * user message that the loop appends with the decision.
+   * @param agent - live Agent whose loop is being configured.
+   */
+  private installDualModelRoles(agent: Agent): void {
+    // Per-step role snapshot: assemble runs before request for each step, so
+    // the worker route and the planner see the same roles value.
+    agent.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembled = await next()
+      const state = this.roles.get(agent)
+      if (state === undefined) return assembled
+      const current = this.ctx.sessionProjections.stateOf(agent.session, 'modelRoles')
+      state.active = current ?? undefined
+      return assembled
+    })
+    // Request routing: replace the resolved config with the worker route while
+    // roles are enabled. Registered after the model-selection request listener
+    // (rolesFor() runs inside selectionFor()), so this replacement applies last.
+    agent.ctx.on('agent/request', async (_payload, next): Promise<LlmCallConfig> => {
+      const resolved = await next()
+      const roles = this.roles.get(agent)?.active
+      if (roles === undefined || !roles.enabled) return resolved
+      const { reasoningEffort: _inherited, ...withoutInheritedEffort } = resolved
+      return {
+        ...withoutInheritedEffort,
+        provider: roles.worker.provider,
+        model: roles.worker.model,
+        ...roles.worker.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(roles.worker.reasoningEffort) },
+      }
+    })
+    // Planning + step message injection at the first step of every turn.
+    agent.ctx.on('agent/pre-step', async ({ agent: subject, step, turn, signal }, next): Promise<PreStepDecision> => {
+      const decision = await next()
+      if (decision.kind === 'reject' || signal.aborted) return decision
+      const state = this.roles.get(subject)
+      const roles = state?.active
+      if (state === undefined || roles === undefined || !roles.enabled) return decision
+      // Only the first step of a turn plans; tool-continuation steps reuse the
+      // existing plan instead of recursing.
+      if (step !== 1) return decision
+      if (decision.messages.length === 0) return decision
+      // Re-read durable roles right before calling: a concurrent disable must
+      // not trigger a planning call.
+      const current = this.ctx.sessionProjections.stateOf(subject.session, 'modelRoles')
+      if (current === null || current === undefined || !current.enabled) return decision
+      const plan = await this.runThinkingModel(subject, current, decision.messages, turn, signal)
+      if (plan === undefined) return decision
+      return { ...decision, messages: [...decision.messages, plan] }
+    })
+  }
+
+  /**
+   * Run one bounded thinking-model call over the durable history plus the
+   * claimed step messages and frame its text output as worker context.
+   * @param agent - live Agent whose session history and route feed the call.
+   * @param roles - validated roles carrying the thinking route.
+   * @param claimed - user messages claimed for this step.
+   * @param turn - the turn whose first step owns the call.
+   * @param signal - the active turn's cancellation signal.
+   * @returns the framed plan message, or undefined when planning failed or produced nothing.
+   */
+  private async runThinkingModel(
+    agent: Agent,
+    roles: ModelRoles,
+    claimed: readonly UserMessage[],
+    turn: number,
+    signal: AbortSignal,
+  ): Promise<UserMessage | undefined> {
+    const thinking = roles.thinking
+    const started = performance.now()
+    const recordSkip = (reason: PlanSkipCode, outcome?: { finish?: string; detail?: string }): void => {
+      try {
+        agent.session.append('dual-model/plan-skipped', {
+          turn,
+          thinking: { provider: thinking.provider, model: thinking.model, ...thinking.reasoningEffort === undefined ? {} : { reasoningEffort: thinking.reasoningEffort } },
+          reason,
+          ...(outcome?.finish === undefined ? {} : { finish: outcome.finish }),
+          ...(outcome?.detail === undefined ? {} : { detail: outcome.detail }),
+          durationMs: Math.max(0, Math.round(performance.now() - started)),
+        })
+      } catch (recordError: unknown) {
+        this.ctx.logger.warn('dual-model: plan-skip record failed: %s', String(recordError))
+      }
+    }
+    if (claimed.length === 0) return undefined
+    let resolved: LlmCallConfig
+    try {
+      resolved = await this.ctx.llm.resolveCallConfig({
+        provider: thinking.provider,
+        model: thinking.model,
+        ...(thinking.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(thinking.reasoningEffort) }),
+      }, signal)
+    } catch (error: unknown) {
+      this.ctx.logger.warn('dual-model: thinking route %s/%s unavailable: %s', thinking.provider, thinking.model, String(error))
+      recordSkip('route-resolve-failed', { detail: String(error) })
+      return undefined
+    }
+    const history = agent.session.deriveMessages()
+    const promptMessages: Message[] = [
+      ...history,
+      ...claimed.map(message => message),
+    ]
+    const options: GenerateOptions = {
+      provider: resolved.provider,
+      model: resolved.model,
+      ...resolved.reasoningEffort === undefined ? {} : { reasoningEffort: resolved.reasoningEffort },
+      messages: promptMessages,
+      system: PLAN_SYSTEM_PROMPT,
+      maxTokens: PLAN_MAX_TOKENS,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(PLAN_CALL_TIMEOUT_MS)]),
+    }
+    const assembler = new BlockAssembler()
+    const collectText = (): string => assembler.blocks()
+      .filter((block): block is Extract<(typeof block), { type: 'text' }> => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+      .trim()
+    try {
+      for await (const chunk of this.ctx.llm.stream(options)) {
+        options.signal?.throwIfAborted()
+        assembler.push(chunk)
+      }
+    } catch (error: unknown) {
+      if (signal.aborted) throw error
+      this.ctx.logger.warn('dual-model: planning call failed: %s', String(error))
+      recordSkip('call-failed', { detail: String(error) })
+      return undefined
+    }
+    // The stream ended without throwing: carry a usable plan out of the
+    // terminal state. `stop` and `max-tokens` keep their assembled text
+    // (a truncated plan still directs the worker); error/aborted and other
+    // finish kinds are unusable and skip the injection. An empty extraction
+    // skips too — commonly the budget was consumed by reasoning alone.
+    const finishKind = assembler.finish.kind
+    if (finishKind !== 'stop' && finishKind !== 'max-tokens') {
+      this.ctx.logger.warn('dual-model: planning finished with %s', finishKind)
+      recordSkip('finish-not-usable', { finish: finishKind, detail: describeFinishReason(finishKind) })
+      return undefined
+    }
+    const text = collectText()
+    if (text.length === 0) {
+      recordSkip('empty-output', { finish: finishKind, detail: 'the planning call completed without any text output' })
+      return undefined
+    }
+    if (finishKind === 'max-tokens') {
+      this.ctx.logger.warn('dual-model: planning hit its token budget; injecting the truncated plan')
+    }
+    const bounded = text.length > PLAN_MAX_CHARS ? `${text.slice(0, PLAN_MAX_CHARS - 1)}…` : text
+    return createUserMessage({
+      content: [{ type: 'text', text: `${PLAN_FRAME}\n${bounded}` }],
+      source: {
+        kind: 'plugin',
+        plugin: 'dual-model',
+        form: 'snapshot',
+        sections: [{ name: 'dual-model plan', text: bounded }],
+      },
+    })
+  }
+
+  /**
+   * Read the environment currently recorded for one Session.
+   * @param session - Session whose projection is available.
+   * @returns the latest environment plan, or undefined for older Sessions.
+   */
+  environmentForSession(session: Session): ModelEnvironmentPlan | undefined {
+    return this.ctx.sessionProjections.stateOf(session, 'modelEnvironment') ?? undefined
+  }
+
+  /**
+   * Resolve one exact route for Session lifecycle binding.
+   * @param provider - exact provider route.
+   * @param model - provider-owned model id.
+   * @param preset - preset mounted by the Agent.
+   * @returns the immutable route environment plan, or undefined when the test
+   * context has no exact-model resolver.
+   */
+  async resolveEnvironmentPlan(
+    provider: string,
+    model: string,
+    preset: string,
+  ): Promise<ModelEnvironmentPlan | undefined> {
+    const llm = this.ctx.get('llm') as unknown as {
+      resolveModelInfo?: (provider: string, model: string) => Promise<LlmResolvedModelInfo>
+    } | undefined
+    if (llm?.resolveModelInfo === undefined) return undefined
+    let resolved: LlmResolvedModelInfo
+    try {
+      resolved = await llm.resolveModelInfo(provider, model)
+    } catch {
+      throw new ModelEnvironmentError(
+        'model-environment/route-unavailable',
+        `model environment route "${provider}/${model}" is unavailable`,
+        { provider, model },
+      )
+    }
+    const presets = this.ctx.get('agentPresets')
+    const availablePresets = presets === undefined
+      ? undefined
+      : (await presets.list()).map(item => item.id)
+    return resolveModelEnvironment({
+      provider,
+      model,
+      preset,
+      policy: this.environmentPolicy,
+      ...(resolved.capabilities === undefined ? {} : { capabilities: resolved.capabilities }),
+      ...(availablePresets === undefined ? {} : { availablePresets }),
+    })
   }
 
   /**
@@ -376,12 +671,14 @@ export class ApiSessionAgentController {
     readonly setup: AgentSetup
   }> {
     const presets = this.ctx.get('agentPresets')
-    if (presets === undefined) return { setup: (agentCtx) => { this.installSelection(agentCtx) } }
+    if (presets === undefined) {
+      return { setup: (_agentCtx, agent) => { this.installSelection(agent) } }
+    }
     const resolvedId = (await presets.resolve(presetId)).id
     return {
       agentPreset: resolvedId,
-      setup: async (agentCtx) => {
-        this.installSelection(agentCtx)
+      setup: async (agentCtx, agent) => {
+        this.installSelection(agent)
         await presets.mount(agentCtx, resolvedId)
       },
     }
@@ -474,14 +771,27 @@ export class ApiSessionAgentController {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
     const composition = await this.composeAgent(presetId)
+    const selection = this.ctx.agentDefaultModel.currentSelection()
+    const environment = await this.resolveEnvironmentPlan(
+      selection.provider,
+      selection.model,
+      composition.agentPreset ?? 'default',
+    )
     return (await this.ctx.agents.create({
       sessionId,
-      agentOptions: this.agentOptions(),
+      agentOptions: { provider: selection.provider, model: selection.model },
       meta: {
         cwd,
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
-      setup: composition.setup,
+      setup: async (agentCtx, scopedAgent) => {
+        const commit = await composition.setup(agentCtx, scopedAgent)
+        if (environment !== undefined) {
+          if (scopedAgent === undefined) throw new Error('api-session: Agent setup has no scoped Agent')
+          scopedAgent.session.append('model/environment', environment)
+        }
+        return commit
+      },
     })).agent
   }
 
@@ -490,9 +800,7 @@ export class ApiSessionAgentController {
     return { provider, model }
   }
 
-  private installSelection(agentCtx: Context): void {
-    const agent = agentCtx.agent
-    if (agent === undefined) throw new Error('api-session: Agent setup has no scoped Agent')
+  private installSelection(agent: Agent): void {
     this.selectionFor(agent)
   }
 
@@ -527,3 +835,17 @@ function agentModelSelection(selection: ModelSelection): AgentModelSelection {
       : { reasoningEffort: ReasoningEffortId(selection.reasoningEffort) }),
   }
 }
+
+/** Planning-model system prompt: produce an executable plan, nothing else. */
+const PLAN_SYSTEM_PROMPT = [
+  'You are the planning model in a two-model pipeline. An executor model will',
+  'carry out the user request using its own tools; it will only see your plan,',
+  'not this conversation. Write the plan the executor needs:',
+  '1. Restate the concrete objective in one line.',
+  '2. Break the work into ordered, verifiable steps.',
+  '3. Note constraints, risks, and acceptance criteria.',
+  'Do not execute anything. Do not converse. Return only the plan text.',
+].join('\n')
+
+/** Planning output budget; shared by reasoning and answer on single-cap routes. */
+const PLAN_MAX_TOKENS = 8_192

@@ -33,11 +33,18 @@ function entry(seq: number): SessionLiveEventEntry {
       time: seq,
       data: { seq },
       ignorable: true,
-    } as SessionLiveEventEntry['event'],
+    } as unknown as SessionLiveEventEntry['event'],
   }
 }
 
 describe('fixture helpers', () => {
+  it('rejects an upload until a suite replaces the default stub', async () => {
+    const runtime = await SlotTestRuntime.create()
+    expect(runtime.fileUpload.available).toBe(false)
+    await expect(runtime.fileUpload.upload('fixture-session' as SessionId)).rejects.toThrow('file upload is not stubbed')
+    await runtime.dispose()
+  })
+
   it('builds independent Conversation and Chat snapshots with optional overrides', () => {
     const conversation = conversationSnapshot()
     expect(conversation).toEqual(EMPTY_CONVERSATION_SNAPSHOT)

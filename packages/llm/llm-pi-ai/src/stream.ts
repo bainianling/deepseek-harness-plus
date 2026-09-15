@@ -15,6 +15,7 @@ import { isContextOverflow } from '@earendil-works/pi-ai'
 import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
 import { toPiReplayState } from './replay.ts'
 
+
 /**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
  * @param usage - cumulative usage from the terminal pi-ai event.
@@ -135,6 +136,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
+ * @param requestedModel - request model identity for durable replay provenance.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
@@ -142,6 +144,7 @@ export async function* toStreamChunks(
   events: AsyncIterable<AssistantMessageEvent>,
   contextWindow?: number,
   callerSignal?: AbortSignal,
+  requestedModel?: string,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -208,19 +211,17 @@ export async function* toStreamChunks(
         yield {
           type: 'finish',
           reason: mapStopReason(event.message, contextWindow),
-          replayState: toPiReplayState(event.message),
+          replayState: toPiReplayState(event.message, requestedModel),
         }
         return
       case 'error':
         // In-stream error delivery (pi-ai's style) → error finish chunk
         // (the harness's other sanctioned error path besides throwing).
         yield { type: 'usage', usage: mapUsage(event.error.usage) }
+        const terminal = callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' as const } : event.error
         yield {
           type: 'finish',
-          reason: mapStopReason(
-            callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' } : event.error,
-            contextWindow,
-          ),
+          reason: mapStopReason(terminal, contextWindow),
         }
         return
       // no default: AssistantMessageEvent is pi-ai's closed union; a new

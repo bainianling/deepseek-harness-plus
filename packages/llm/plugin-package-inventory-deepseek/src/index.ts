@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type { Entry, EntryTree } from '@deepseek-ai/cordis-plugin-loader'
+import type { Entry, EntryTree, ModuleLoader } from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -82,6 +82,32 @@ function barePackageManifest(packageName: string, anchors: readonly string[]): s
   return undefined
 }
 
+/**
+ * Resolve a bare package through the Loader's own internal ESM module loader —
+ * the same resolver that imported the active entry. Static package layouts can
+ * miss packages the running loader reaches (pnpm's hidden hoist directory,
+ * TypeScript path aliases), so this fallback keeps identity answers aligned
+ * with the modules that actually loaded.
+ */
+function barePackageManifestViaLoader(
+  loader: EntryTree,
+  packageName: string,
+  baseUrl: string,
+): string | undefined {
+  // EntryTree reads the module loader off its owning Loader service; the
+  // guarded context read keeps direct embedders without one on the no-internals path.
+  const internal: ModuleLoader | undefined = loader.ctx.loader?.internal
+  if (internal === undefined) return undefined
+  // Both shapes answer a plain resolve without importing the module. The v1
+  // signature is (specifier, parentURL, attributes); v2 reversed it to
+  // (parentURL, request) after moving resolution onto resolveSync.
+  const moduleUrl = internal.version === 'v1'
+    ? internal.resolveSync(packageName, baseUrl, {}).url
+    : internal.resolveSync(baseUrl, { specifier: packageName }).url
+  if (new URL(moduleUrl).protocol !== 'file:') return undefined
+  return nearestManifest(fileURLToPath(moduleUrl))
+}
+
 /** Find the nearest owning manifest for a relative or absolute plugin module. */
 function nearestManifest(modulePath: string): string | undefined {
   let current = dirname(modulePath)
@@ -102,7 +128,7 @@ class PackageIdentityResolver {
   constructor(private readonly hostBaseUrl: string) {}
 
   /** Resolve one Loader entry's owning package, or absence for a non-package loose module. */
-  resolve({ entry, bareBaseUrl }: ActiveEntry): DeepSeekPluginPackageIdentity | undefined {
+  async resolve({ entry, bareBaseUrl }: ActiveEntry, fallbackLoader?: EntryTree): Promise<DeepSeekPluginPackageIdentity | undefined> {
     /* v8 ignore next -- Loader entry trees inherit a base URL; the fallback supports direct embedders. */
     const treeBase = entry.parent.tree.ctx.baseUrl ?? this.hostBaseUrl
     const anchors = [...new Set([bareBaseUrl ?? treeBase, treeBase, this.hostBaseUrl, import.meta.url])]
@@ -113,6 +139,18 @@ class PackageIdentityResolver {
     let manifest: string | undefined
     if (packageName !== undefined) {
       manifest = barePackageManifest(packageName, anchors)
+      if (manifest === undefined && fallbackLoader !== undefined) {
+        // Static package layouts can miss what the running Loader imported
+        // (pnpm's hidden hoist directory, TypeScript path aliases). The
+        // Loader's own internal ESM resolver is authoritative: an entry it
+        // activated must resolve through the same chain.
+        try {
+          manifest = barePackageManifestViaLoader(fallbackLoader, packageName, bareBaseUrl ?? treeBase)
+        } catch {
+          // A resolver failure means the identity is unreachable either way;
+          // fall through to the canonical hard failure below.
+        }
+      }
       if (manifest === undefined) {
         throw new Error(`plugin-package-inventory-deepseek: cannot resolve active package ${JSON.stringify(packageName)}`)
       }
@@ -169,7 +207,7 @@ async function collectActivePluginPackages(
   }
   const unique = new Map<string, DeepSeekPluginPackageIdentity>()
   for (const activeEntry of entries) {
-    const identity = resolver.resolve(activeEntry)
+    const identity = await resolver.resolve(activeEntry, ctx.loader)
     if (identity === undefined) continue
     unique.set(`${identity.name}\u0000${identity.version}`, identity)
   }

@@ -3,7 +3,7 @@
 > **本仓库是个人二次修改版（Modified Fork），不是 DeepSeek 官方项目。**
 > 原版来源：[deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)，
 > 初始基线提交：`cd5ef8148158c3a752a658978873241fdf8e2bbc`（release `0.1.2-alpha.1`）。
-> 当前同步源码：`dsh-v0.1.2-alpha.5`（来源工作树提交 `3b479baa1cec71898a95684a3daa21f40934ac7f`，并包含其未提交的本地改动）。
+> 当前同步源码：`dsh-v0.1.5-rc.2`（版本号 `0.1.5-rc.2`，来源工作树提交 `4f3b2070ebdb5c44171405f1b841e2719057f5b4`，并包含其本地改动）。
 > 原版采用 [MIT License](LICENSE)（Copyright (c) 2026 DeepSeek），本仓库沿用 MIT 许可证并保留原始版权声明。
 > 使用前请务必阅读 [免责声明](DISCLAIMER.md)。
 
@@ -16,9 +16,10 @@
 DeepSeek Harness（`dsh`）是 DeepSeek 开源的「一切皆插件」Agent 运行框架（基于 [Cordis](https://github.com/cordiverse/cordis)），
 自带 Web GUI、CLI、Headless、ACP、Python SDK 等多种运行形态。
 
-本仓库以官方 `0.1.2-alpha.1` 为初始基线，并已同步上游至 `dsh-v0.1.2-alpha.5`；在此基础上继续保留本地二次修改。核心目标是：**把 Web GUI 从一个聊天界面扩展成一个多功能工作台**，
+本仓库以官方 `0.1.2-alpha.1` 为初始基线，并已同步上游至 `dsh-v0.1.5-rc.2`；在此基础上继续保留本地二次修改。核心目标是：**把 Web GUI 从一个聊天界面扩展成一个多功能工作台**，
 新增了一批应用级功能分区（AI 实时新闻、技能市场、知识库、模型测试台、LoRA 训练工作室、虚拟软件公司、声线克隆、内置浏览器、内置终端、自动化任务等），
-并补充了壁纸、局域网共享开关、会话内切换 Agent preset、跨工作区移动对话、停止服务按钮、破甲（jailbreak）红队模式等增强。
+并补充了壁纸、局域网共享开关、会话内切换 Agent preset、跨工作区移动对话、停止服务按钮、破甲（jailbreak）红队模式等增强，
+以及双模型角色分工、提示词增强、对话创造等会话能力提升。
 
 完整修改清单（含每一项的文件路径与规模统计）见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
@@ -53,6 +54,17 @@ DeepSeek Harness（`dsh`）是 DeepSeek 开源的「一切皆插件」Agent 运�
 | 🖼️ **图片导入输入** | 输入栏图片导入（ComposerImageImport）与附件栏调整 | `ui-attachment/` |
 | 💰 **模型余额入口** | 模型选择器旁的余额 / 用量快捷入口 | `ModelBalanceAction` |
 | 🎨 **主题细节** | 滚动条、渐变阴影文字、平台化设计变量等样式增强 | `ui-theme/` |
+
+### 新增：本机二开增强（`dsh-v0.1.5-rc.2` 增量）
+
+| 功能 | 说明 | 主要实现 |
+| --- | --- | --- |
+| 🧠 **双模型角色（思考 / 执行）** | 会话级双模型分工：分别指定「思考模型」与「执行模型」，投影按会话持久化；GUI 提供角色控制与角色目录选择 | `session-controller/src/model-roles-projection.ts`、`ui-model-selection/ModelRolesControl`、`model-roles.ts` |
+| ✨ **提示词增强** | 输入栏一键把草稿扩写为更完整的提示词：host 侧有界读取工作区上下文（文件数/深度/字节数上限，跳过 `.git`、`node_modules`、`.env`、凭据等敏感项），再以指定模型单次生成，客户端可预览并回填 | `session-controller/src/prompt-enhancement.ts`、`ui-model-selection/PromptEnhancer` |
+| 💬 **对话创造（Conversation Create）** | 编排一段完整对话草稿（用户 / 助手 / 工具调用 / 工具结果四类条目），选择分组目录与智能体预设后创建为**真实会话**并逐轮执行，创建后 AI 可继续接手；含草稿校验、预览、进度与失败阶段提示 | `ui-layout/ConversationCreateApp.tsx`、`conversation-create.ts`、`conversation-creator.ts` |
+| 🗂️ **历史会话路由与事件** | 新增历史路由与历史事件支撑，用于跨版本会话日志的读取与兼容 | `core/session/src/historical-route.ts`、`historical-events.ts` |
+| 🏢 **Collab Studio 增强** | 驱动、存储与类型层增强（`driver.ts` / `store.ts` / `types.ts`），配套测试扩充 | `packages/web/collab-studio/` |
+| 🔌 **LLM 适配与插件清单** | `llm-deepseek` 序列化与类型、`llm-pi-ai` 适配与配置、插件包清单（含测试）配套更新 | `packages/llm/`、`plugin-package-inventory-deepseek` |
 
 ### 新增：破甲（Jailbreak）红队模式
 
@@ -102,7 +114,7 @@ pnpm dsh web        # 打开 http://127.0.0.1:3080
 
 This is a **personal modified fork** of [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
 (initial baseline commit `cd5ef8148158c3a752a658978873241fdf8e2bbc`, currently synced through
-`dsh-v0.1.2-alpha.5`, MIT License). It is **not** an official DeepSeek product.
+`dsh-v0.1.5-rc.2`, MIT License). It is **not** an official DeepSeek product.
 
 On top of the upstream agent harness, this fork extends the Web GUI into a multi-function workbench:
 AI news aggregation, a read-only skill marketplace, a Hindsight knowledge-center view, a multi-model
@@ -110,7 +122,9 @@ benchmark bench, a LoRA training studio (local kohya-based service), a multi-age
 company" studio, voice cloning against a local IndexTTS service, a built-in browser panel and terminal,
 automation scheduling, wallpapers, LAN-share control, per-session agent preset switching, cross-workspace
 conversation moves, a stop-server action, session import/delete, and an experimental jailbreak preset
-intended **only** for authorized red-team security evaluation. See [MODIFICATIONS.md](MODIFICATIONS.md)
+intended **only** for authorized red-team security evaluation. The current release adds a session-level
+dual-model (thinking/worker) role split, one-click prompt enhancement with bounded workspace context, and a
+conversation-creation flow that turns an authored draft into a real session. See [MODIFICATIONS.md](MODIFICATIONS.md)
 for the full change list and [DISCLAIMER.md](DISCLAIMER.md) for the disclaimer.
 
 Quick start: `pnpm install && pnpm run build && pnpm dsh web` (Node.js `^22.19.0 || >=24.0.0`, pnpm required).

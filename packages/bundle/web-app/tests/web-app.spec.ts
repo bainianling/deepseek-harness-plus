@@ -135,8 +135,8 @@ describe('web-app runtime glue', () => {
     const log = vi.spyOn(console, 'log').mockImplementation((message) => { lifecycle.push(String(message)) })
     const openBrowser = vi.fn(async (url: string) => { lifecycle.push(`open:${url}`) })
     internals.openBrowser = openBrowser
-    apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: ['lab.internal'], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
-    await ctx.plugin(SystemPrompt, { persona: '' })
+    apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: ['lab.internal'], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
     // Settle the injected registrations.
     await new Promise(resolve => setTimeout(resolve, 0))
 
@@ -173,8 +173,8 @@ describe('web-app runtime glue', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const openBrowser = vi.fn(async () => {})
     internals.openBrowser = openBrowser
-    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
-    await ctx.plugin(SystemPrompt, { persona: '' })
+    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).not.toHaveBeenCalled()
     expect(openBrowser).not.toHaveBeenCalled()
@@ -196,8 +196,8 @@ describe('web-app runtime glue', () => {
         return () => {}
       },
     } as never)
-    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
-    await ctx.plugin(SystemPrompt, { persona: '' })
+    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
     await new Promise(resolve => setTimeout(resolve, 0))
     const assembly = await ctx.systemPrompt.assemble()
     expect(assembly.sections.some(entry => entry.name === 'app:web-surface')).toBe(false)
@@ -212,7 +212,7 @@ describe('web-app runtime glue', () => {
     ctx.provide('webServer', fakeHttpServer().server)
     provideConnection(ctx)
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
     await ctx.fiber.dispose()
@@ -225,7 +225,7 @@ describe('web-app runtime glue', () => {
     const first = ctx.plugin((connectionCtx: Context) => { provideConnection(connectionCtx) })
     await first
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledTimes(1)
 
@@ -248,7 +248,7 @@ describe('web-app runtime glue', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const openBrowser = vi.fn(async () => {})
     internals.openBrowser = openBrowser
-    apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(ctx, new Config({ openBrowser: true, printUrl: true, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
     expect(openBrowser).not.toHaveBeenCalled()
@@ -268,7 +268,7 @@ describe('web-app runtime glue', () => {
     const settlement = new Promise<void>((resolve) => { release = resolve })
     provideLoader(settled, () => settlement)
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    apply(settled, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(settled, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).not.toHaveBeenCalled()
     expect(openBrowser).not.toHaveBeenCalled()
@@ -286,7 +286,7 @@ describe('web-app runtime glue', () => {
     failed.provide('webServer', fakeHttpServer().server)
     provideConnection(failed)
     provideLoader(failed, async () => { throw new Error('boot failed') })
-    apply(failed, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(failed, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).not.toHaveBeenCalled()
     expect(openBrowser).not.toHaveBeenCalled()
@@ -305,7 +305,7 @@ describe('web-app runtime glue', () => {
     let releaseTorn: () => void
     const tornSettlement = new Promise<void>((resolve) => { releaseTorn = resolve })
     provideLoader(torn, () => tornSettlement)
-    apply(torn, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(torn, new Config({ openBrowser: true, printUrl: true, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     await child.dispose() // the webServer service goes away
     releaseTorn!()
@@ -324,8 +324,8 @@ describe('web-app runtime glue', () => {
     Object.defineProperty(server, 'port', { get: () => undefined })
     ctx.provide('webServer', server)
     provideConnection(ctx)
-    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
-    await ctx.plugin(SystemPrompt, { persona: '' })
+    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: true, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
     await new Promise(resolve => setTimeout(resolve, 0))
     await expect(ctx.systemPrompt.assemble()).rejects.toThrow('webServer service missing')
     await ctx.fiber.dispose()
@@ -350,7 +350,7 @@ describe('web-app runtime glue', () => {
     internals.openBrowser = vi.fn(async () => { throw failure })
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
-    apply(ctx, new Config({ openBrowser: true, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000 }))
+    apply(ctx, new Config({ openBrowser: true, printUrl: false, surfaceContext: false, trustedHosts: [], hindsightUrl: 'http://127.0.0.1:9077', hindsightBankId: 'coding-agent::deepseek-harness', knowledgeTimeoutMs: 5000, hindsightProfile: 'dsh-local', hindsightCommand: 'hindsight-embed', hindsightStartTimeoutMs: 30_000 }))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledWith('dsh web: opening the default browser; pass --no-open to disable')
     expect(diagnostic).toHaveBeenCalledWith(

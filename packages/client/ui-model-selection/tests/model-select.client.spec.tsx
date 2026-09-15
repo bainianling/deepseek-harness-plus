@@ -5,6 +5,7 @@ import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ComponentProps } from 'react'
 import type { ModelDirectoryState } from '../src/client/directory.ts'
+import type { ModelRolesState } from '../src/client/roles-directory.ts'
 import { ModelSelect } from '../src/client/ModelSelect.tsx'
 import { zh } from '../src/client/locales.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
@@ -52,6 +53,16 @@ function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryStat
 
 afterEach(cleanup)
 
+/** Disabled dual-model roles store: the seat renders normally. */
+function disabledRoles(): ComponentProps<typeof ModelSelect>['roles'] {
+  return createSnapshotStore<ModelRolesState>({
+    available: true,
+    value: null,
+    status: 'ready',
+    error: null,
+  })
+}
+
 describe('ModelSelect reasoning effort', () => {
   it('renders effort names without descriptions and submits the effort as part of the session selection', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
@@ -63,6 +74,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available
       directory={directory}
+      roles={disabledRoles()}
       load={vi.fn()}
       select={select}
       t={t}
@@ -105,6 +117,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available
       directory={directory}
+      roles={disabledRoles()}
       load={vi.fn()}
       select={vi.fn().mockResolvedValue(true)}
       t={t}
@@ -118,6 +131,48 @@ describe('ModelSelect reasoning effort', () => {
       .toEqual(['Default', 'Standard'])
   })
 
+  it('hides the seat while dual-model roles are enabled and restores it after they turn off', () => {
+    const directory = createSnapshotStore(state())
+    const roles = createSnapshotStore<ModelRolesState>({
+      available: true,
+      value: {
+        enabled: true,
+        thinking: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+        worker: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      },
+      status: 'ready',
+      error: null,
+    })
+    const { rerender } = render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      roles={roles}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+
+    expect(screen.queryByRole('button', { name: /选择模型/ })).toBeNull()
+
+    roles.set({
+      available: true,
+      value: null,
+      status: 'ready',
+      error: null,
+    })
+    rerender(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      roles={roles}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+    expect(screen.getByRole('button', { name: /选择模型/ })).toBeTruthy()
+  })
+
   it('shows the durable model id when the catalog has no matching display name', () => {
     const directory = createSnapshotStore(state({
       current: { provider: 'deepseek-official', model: 'removed-model' },
@@ -127,6 +182,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available
       directory={directory}
+      roles={disabledRoles()}
       load={vi.fn()}
       select={select}
       t={t}
@@ -153,6 +209,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available
       directory={directory}
+      roles={disabledRoles()}
       load={vi.fn()}
       select={vi.fn().mockResolvedValue(true)}
       t={t}
@@ -186,6 +243,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available
       directory={directory}
+      roles={disabledRoles()}
       load={vi.fn()}
       select={select}
       t={t}
@@ -206,6 +264,7 @@ describe('ModelSelect reasoning effort', () => {
       locked={false}
       available={false}
       directory={createSnapshotStore(state())}
+      roles={disabledRoles()}
       load={load}
       select={vi.fn().mockResolvedValue(false)}
       t={t}

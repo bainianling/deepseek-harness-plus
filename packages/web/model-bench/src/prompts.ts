@@ -72,9 +72,9 @@ export function parseQuestionMeta(raw: unknown): QuestionMeta {
   const difficultyRaw = typeof source.difficulty === 'string' ? source.difficulty.toLowerCase() : ''
   const difficulty: QuestionMeta['difficulty'] =
     difficultyRaw === 'easy' ? 'easy'
-    : difficultyRaw === 'medium' ? 'medium'
-    : difficultyRaw === 'hard' ? 'hard'
-    : 'unknown'
+      : difficultyRaw === 'medium' ? 'medium'
+        : difficultyRaw === 'hard' ? 'hard'
+          : 'unknown'
   const thresholdRaw = typeof source.passThreshold === 'number' ? source.passThreshold : Number(source.passThreshold)
   const passThreshold = Number.isFinite(thresholdRaw) ? Math.max(0, Math.min(10, thresholdRaw)) : 6
   const judgeNotes = typeof source.judgeNotes === 'string' ? source.judgeNotes.trim().slice(0, 2000) : ''

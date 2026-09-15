@@ -24,9 +24,9 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
-      Work efficiently: reuse facts already established in the conversation, batch independent inspection, and do not repeat completed searches or plans. Once evidence is sufficient, implement the change, run focused verification, and report the result concisely. Never emit internal control markup such as <thinking>, <analysis>, or similar tags in user-visible commentary or final text; private reasoning belongs only in the provider reasoning channel.
+    suffix: Your working directory is {{cwd}}.
+    prefix: >-
+      You are a coding agent powered by the {{model}} model.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -268,3 +268,6 @@
   config:
     fetch: true
     searchTimeoutMs: 60000
+
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'

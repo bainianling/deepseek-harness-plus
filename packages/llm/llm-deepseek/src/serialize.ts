@@ -22,6 +22,8 @@ import type {
 export interface RequestDefaults {
   thinking?: 'enabled' | 'disabled' | undefined
   reasoningEffort?: 'off' | 'low' | 'high' | 'max' | undefined
+  /** Deployment repetition penalty applied to every request; omission keeps the provider default. */
+  repetitionPenalty?: number | undefined
 }
 
 interface ResolvedThinking {
@@ -365,6 +367,7 @@ function requestWithMessages(
       : {},
     ...tools !== undefined && tools.length > 0 ? { tools } : {},
     ...options.temperature !== undefined ? { temperature: options.temperature } : {},
+    ...defaults.repetitionPenalty !== undefined ? { repetition_penalty: defaults.repetitionPenalty } : {},
     ...options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens },
     ...options.stop !== undefined ? { stop: options.stop } : {},
   }
@@ -375,7 +378,7 @@ function requestWithMessages(
  * reporting on); optional fields are omitted rather than sent as null, so
  * provider defaults apply.
  * @param options - the harness request (model, history, system, tools, sampling).
- * @param defaults - adapter-level thinking defaults; undefined fields put nothing on the wire.
+ * @param defaults - adapter-level thinking and sampling defaults; undefined fields put nothing on the wire.
  * @returns the chat-completions request body.
  */
 export function serializeRequest(

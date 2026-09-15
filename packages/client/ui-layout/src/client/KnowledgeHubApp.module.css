@@ -130,7 +130,8 @@
 .filterButton:focus-visible,
 .pageRow:focus-visible,
 .tagList button:focus-visible,
-.errorBar button:focus-visible {
+.errorBar button:focus-visible,
+.daemonPanel button:focus-visible {
   outline: 2px solid var(--dsw-alias-label-primary-bluish);
   outline-offset: 2px;
 }
@@ -138,6 +139,96 @@
 .iconButton:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+.daemonPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.daemonStatus {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.daemonDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.daemonPanel[data-state='online'] .daemonDot {
+  background: var(--dsw-alias-state-success-primary);
+  box-shadow: 0 0 0 3px var(--dsw-alias-state-success-tertiary);
+}
+
+.daemonPanel[data-state='starting'] .daemonDot {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.daemonPanel[data-state='error'] .daemonDot {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.daemonCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.daemonCopy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.daemonCopy > span {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.daemonDiagnostic {
+  max-width: 100%;
+  max-height: 120px;
+  margin: 4px 0 0;
+  overflow: auto;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.daemonPanel[data-state='error'] .daemonDiagnostic {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.daemonPanel[data-state='starting'] .daemonDot {
+  animation: daemonPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes daemonPulse {
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .daemonPanel[data-state='starting'] .daemonDot {
+    animation: none;
+  }
 }
 
 .errorBar {

@@ -22,7 +22,9 @@ import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { SessionNode, SessionOrderBy } from '../tree.ts'
-import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from '../tree.ts'
+import {
+  deriveFlat, deriveGroups, deriveSearchResults, owningGroupKey, UNGROUPED_KEY,
+} from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
@@ -238,6 +240,8 @@ type SessionTreeProps = Pick<
   /** Host account home for POSIX hover-path abbreviation. */
   home?: string | undefined
   workspaces: readonly WorkspaceView[]
+  /** Whether the current Workspace stream has a complete Host baseline. */
+  workspaceReady: boolean
   /** Explicit persisted zero-or-five-session state by Workspace group. */
   groupExpansion: Readonly<Record<string, boolean>>
   /** Persist one Workspace group's zero-or-five-session state. */
@@ -266,19 +270,28 @@ type SessionTreeProps = Pick<
   onSessionDeleteRequest: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
   orderBy: SessionOrderBy
+  /** One Session chosen from search that must be exposed and scrolled into view. */
+  revealSessionId?: SessionId | undefined
+  /** Acknowledge that the chosen Session row has been revealed. */
+  onSessionRevealed: (sessionId: SessionId) => void
 }
 
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
 function SessionTree({
   useSessions, useSessionPendingInteraction, startSession, open, forkSession, workspaces, archivedSessionIds,
+  workspaceReady,
   onRenameRequest, onDeleteRequest, onSessionRename, onSessionMove, onSessionArchive, onSessionDeleteRequest,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
+  revealSessionId, onSessionRevealed,
 }: SessionTreeProps) {
   const list = useSessions(s => s)
   const pendingInteractions = useSessionPendingInteraction(s => s)
   const current = list.current
+  const revealGroup = revealSessionId === undefined || !workspaceReady
+    ? undefined
+    : owningGroupKey(workspaces, revealSessionId)
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<string[]>([])
   // Transient drag marker state; the selected mode owns the resulting order.
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -288,10 +301,9 @@ function SessionTree({
   const previousOrderBy = useRef(orderBy)
   const nativeDragActive = drag !== null || workspaceDrag !== null
   useNativeDragAcceptance(nativeDragActive)
-  const currentGroup = current === undefined
+  const currentGroup = current === undefined || !workspaceReady
     ? undefined
-    : (workspaces.find(w => w.sessionIds.includes(current))?.workspaceId as string | undefined)
-      ?? UNGROUPED_KEY
+    : owningGroupKey(workspaces, current)
   useEffect(() => {
     if (current === undefined || currentGroup === undefined || Object.hasOwn(groupExpansion, currentGroup)) return
     setGroupExpanded(currentGroup, true)
@@ -351,6 +363,17 @@ function SessionTree({
     }),
     [list, orderedWorkspaces, archivedSessionIds, pendingInteractions, expandedGroups, sessionOrderByAccount],
   )
+  useEffect(() => {
+    if (revealGroup === undefined || groupExpansion[revealGroup] === true) return
+    setGroupExpanded(revealGroup, true)
+  }, [groupExpansion, revealGroup, setGroupExpanded])
+  useEffect(() => {
+    if (revealSessionId === undefined || revealGroup === undefined) return
+    const group = groups.find(candidate => candidate.key === revealGroup)
+    if (group === undefined || !group.expanded || !group.sessions.some(row => row.id === revealSessionId)) return
+    if (collapsedSessionRows(group.sessions).rows.some(row => row.id === revealSessionId)) return
+    setExpandedSessionGroups(keys => keys.includes(revealGroup) ? keys : [...keys, revealGroup])
+  }, [groups, revealGroup, revealSessionId])
   const now = Date.now()
   const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
     if (sessionDropCommitted.current) return
@@ -570,6 +593,9 @@ function SessionTree({
                     onMove={onSessionMove}
                     onArchive={onSessionArchive}
                     onDelete={onSessionDeleteRequest}
+                    onReveal={node.id === revealSessionId && group.key === revealGroup
+                      ? () => { onSessionRevealed(node.id) }
+                      : undefined}
                     drag={dragProps}
                     t={t}
                   />
@@ -601,7 +627,8 @@ function FlatList({
   useSessions, useSessionPendingInteraction, open, forkSession, onSessionRename, onSessionMove,
   onSessionArchive, onSessionDeleteRequest,
   archivedSessionIds,
-  orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t,
+  orderBy, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder,
+  revealSessionId, onSessionRevealed, t,
 }: Pick<
   SessionTreeProps,
   | 'useSessions'
@@ -618,6 +645,8 @@ function FlatList({
   | 'sessionUpdatedAtByAccount'
   | 'syncSessionOrderAccount'
   | 'setSessionOrder'
+  | 'revealSessionId'
+  | 'onSessionRevealed'
   | 't'
 >) {
   const list = useSessions(s => s)
@@ -694,6 +723,9 @@ function FlatList({
               onMove={onSessionMove}
               onArchive={onSessionArchive}
               onDelete={onSessionDeleteRequest}
+              onReveal={node.id === revealSessionId
+                ? () => { onSessionRevealed(node.id) }
+                : undefined}
               flat
               drag={{
                 start: () => {
@@ -840,6 +872,7 @@ export function WorkspaceBrowser({
   const home = useHostInfo(info => info.home)
   const workspaces = useWorkspaces(state => state.items)
   const workspacePhase = useWorkspaces(state => state.phase)
+  const workspaceStreamState = useWorkspaces(state => state.state)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
   // Live occupancy of this surface's directory-flow hole (the same source the
   // flow reads): a composition without a picking affordance can add nothing.
@@ -854,9 +887,9 @@ export function WorkspaceBrowser({
     return current !== undefined && state.byId[current]?.blank === true ? current : undefined
   })
   const currentBlankAccount = currentBlankSessionId === undefined
+    || workspacePhase !== 'ready'
     ? undefined
-    : (workspaces.find(workspace => workspace.sessionIds.includes(currentBlankSessionId))
-      ?.workspaceId as string | undefined) ?? UNGROUPED_KEY
+    : owningGroupKey(workspaces, currentBlankSessionId)
   const promotedBlank = useRef<{ sessionId: SessionId; accountKey: string } | undefined>(undefined)
   useEffect(() => {
     if (currentBlankSessionId === undefined || currentBlankAccount === undefined) {
@@ -887,6 +920,7 @@ export function WorkspaceBrowser({
   // does not silently drop an in-progress filter.
   const [query, setQuery] = useState('')
   const [searchExpanded, setSearchExpanded] = useState(false)
+  const [revealSessionId, setRevealSessionId] = useState<SessionId | undefined>(undefined)
   const normalizedQuery = sanitizeSearchQuery(query).trim()
   const [remoteSearch, setRemoteSearch] = useState<RemoteSearchState>({
     query: '',
@@ -901,6 +935,19 @@ export function WorkspaceBrowser({
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
+
+  const openSearchResult = (sessionId: SessionId): void => {
+    setRevealSessionId(sessionId)
+    setQuery('')
+    setSearchExpanded(false)
+    open(sessionId)
+  }
+  const acknowledgeSessionReveal = (sessionId: SessionId): void => {
+    setRevealSessionId(current => current === sessionId ? undefined : current)
+  }
+  useEffect(() => {
+    if (normalizedQuery !== '') setRevealSessionId(undefined)
+  }, [normalizedQuery])
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1280,7 +1327,7 @@ export function WorkspaceBrowser({
             <SearchResults
               useSessions={useSessions}
               useSessionPendingInteraction={useSessionPendingInteraction}
-              open={open}
+              open={openSearchResult}
               workspaces={workspaces}
               archivedSessionIds={archivedSessionIds}
               query={normalizedQuery}
@@ -1302,6 +1349,8 @@ export function WorkspaceBrowser({
                 sessionUpdatedAtByAccount={sessionUpdatedAtByAccount}
                 syncSessionOrderAccount={actions.syncSessionOrderAccount}
                 setSessionOrder={actions.setSessionOrder}
+                revealSessionId={revealSessionId}
+                onSessionRevealed={acknowledgeSessionReveal}
                 t={t}
               />
             )
@@ -1315,6 +1364,7 @@ export function WorkspaceBrowser({
                 onSessionDeleteRequest={onSessionDeleteRequest}
                 forkSession={forkSession}
                 workspaces={workspaces}
+                workspaceReady={workspacePhase === 'ready' && workspaceStreamState !== 'loading'}
                 groupExpansion={groupExpansion}
                 setGroupExpanded={actions.setGroupExpanded}
                 sessionOrderByAccount={sessionOrderByAccount}
@@ -1327,6 +1377,8 @@ export function WorkspaceBrowser({
                 insertWorkspaceBefore={insertWorkspaceBefore}
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
+                revealSessionId={revealSessionId}
+                onSessionRevealed={acknowledgeSessionReveal}
                 home={home}
                 t={t}
                 onRenameRequest={(workspaceId, currentTitle) => {

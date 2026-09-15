@@ -42,12 +42,18 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t }:
+  { locked, available, directory, roles, load, select, t }:
   ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
+  )
+  // While dual-model roles are enabled the worker route overrides every
+  // request's model, so the single-model seat hides entirely.
+  const rolesState = useSyncExternalStore(
+    fn => roles.subscribe(fn),
+    () => roles.getSnapshot(),
   )
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
@@ -114,7 +120,7 @@ export function ModelSelect(
     return () => { document.removeEventListener('mousedown', closeOutside) }
   }, [open])
 
-  if (!available) return null
+  if (!available || rolesState.value?.enabled === true) return null
 
   const show = (): void => {
     setPane('root')

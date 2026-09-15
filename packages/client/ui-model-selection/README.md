@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package provides model selection in the Web GUI: the `/model` popup command and the composer's model seat, both over one per-session directory of provider-grouped models. Choosing a model submits the complete selection — provider, model, and reasoning effort — which the Host snapshots at the next prompt-assembly boundary, so the following request uses it while a running step keeps its assembled selection. The composer seat shows a two-level Model/Effort menu: models stay provider-grouped, and the selected exact model supplies its adapter-owned effort names and default. When the Host reports that no adapter serves the session's route, the composer input goes inert until a route becomes available.
+This package provides model selection in the Web GUI: the `/model` popup command and the composer's model seat, both over one per-session directory of provider-grouped models. Choosing a model submits the complete selection — provider, model, and reasoning effort — which the Host snapshots at the next prompt-assembly boundary, so the following request uses it while a running step keeps its assembled selection. The composer seat shows a two-level Model/Effort menu: models stay provider-grouped, and the selected exact model supplies its adapter-owned effort names and default. When the Host reports that no adapter serves the session's route, the composer input goes inert until a route becomes available. The package also mounts the composer's prompt-enhancement entry (`conversation.input.right`): the currently selected model rewrites the draft on request, optionally after a bounded read-only project summary.
 
 ## Table of Contents
 
@@ -35,6 +35,10 @@ Models stay grouped by provider. The menu shows model and effort names only; cat
 
 When the Host reports that no adapter serves the session's route, this plugin raises a composer block and the input goes inert with its own copy; recovering clears it without a reload. A `null` before the first load or after one failed never blocks, and catalog membership never blocks either — a route serving a model it does not advertise is missing from the groups yet usable.
 
+### Prompt enhancement
+
+The composer's `丰富` entry sits immediately left of the model seat. Opening it shows one embedded option — whether the Host should first read a bounded, read-only project summary — and the rewrite action. The request carries the directory's exact current selection, so the Host can reject a stale model; a rejected call surfaces as an inline error strip while the draft is untouched. An accepted rewrite replaces the draft in place, keeps the pre-rewrite text for a one-step revert inside the panel, and never sends the draft automatically.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -44,6 +48,8 @@ When the Host reports that no adapter serves the session's route, this plugin ra
 <summary>Implementation internals — click to expand</summary>
 
 Two entries over ONE per-session directory owned by `ModelDirectoryResolver` (`ctx.modelDirectories`): the `/model` popupSelect contribution (registered through `ctx.commandUi`) and the composer's named `conversation.input.model` seat both load the session's advisory directory through `session.models` and submit through `session.selectModel` via the same `ModelDirectory` instance, so a switch made in either entry is what the other shows next. Directory loads and selections share a generation counter so an older response never overwrites a newer one; a connection reset drops every resident projection and repulls the Host-restored selection. Directories are per-session, resolved lazily, and disposed with the session scope; addressed subagent sessions expose neither entry. Every resident directory refetches directly on forwarded `llm/adapters-updated` and `settings/document-updated` owner events.
+
+The prompt-enhancement entry is a third `conversation.input.right` occupant over the SAME per-session directory: its inject face binds the directory store and a `session.enhancePrompt` closure, and the component reads the draft through the standard `useInput` hook. It renders nothing for addressed subagent sessions, mirrors the Host's exact-selection rule by sending `directory.current` verbatim, and keeps the revert buffer in component state only.
 
 </details>
 
@@ -64,11 +70,11 @@ Read these pages when the model surface is not enough. They move from the browse
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the `session.selectModel` selection both entries submit: the Host snapshots the complete `ModelSelection` at the next prompt-assembly boundary and owns the model-visible effect, while a running step keeps its assembled selection.
+Indirectly, through the `session.selectModel` selection both entries submit: the Host snapshots the complete `ModelSelection` at the next prompt-assembly boundary and owns the model-visible effect, while a running step keeps its assembled selection. The prompt-enhancement entry reads the same directory and sends its exact `current` as a one-shot rewrite route; the Host validates it against the session's live selection before calling the model.
 
 #### KV Cache effect
 
-Switching the route can reduce or invalidate provider-side cache reuse for subsequent requests; the prompt prefix itself is untouched.
+Switching the route can reduce or invalidate provider-side cache reuse for subsequent requests; the prompt prefix itself is untouched. Prompt-enhancement one-shots are isolated from session history and do not affect either.
 
 ## Known Limitations and Deferred Work
 

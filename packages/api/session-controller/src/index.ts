@@ -1,9 +1,12 @@
 /** Session Remote owner: cold reads, explicit Agent commands, and live control state. */
 
+import { hostname } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { errorChain } from '@deepseek-ai/dsh-llm'
-import { canOpenNativePath, openNativePath } from '@deepseek-ai/dsh-native-command'
+import type { LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-client-file-upload'
+import { canOpenNativePath, nativeFileManager, openNativePath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
@@ -17,13 +20,23 @@ import { SessionCommandController } from './commands.ts'
 import { SessionControlController } from './control.ts'
 import { SessionHistoryController } from './history.ts'
 import { SessionFileReferences } from './file-references.ts'
-import { ApiSessionList, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './list.ts'
+import { ApiSessionList } from './list.ts'
 import { buildModelCatalog } from './catalog.ts'
 import { installModelSelectionProjection } from './model-selection-projection.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionTerminalController } from './terminal.ts'
+import { ModelEnvironmentError, resolveModelEnvironment } from './environment.ts'
+import { modelEnvironmentProjection } from './environment-projection.ts'
+import { modelRolesProjection } from './model-roles-projection.ts'
+import { SessionMediaReferences } from './media-references.ts'
+import { enhancePrompt as enhancePromptDraft } from './prompt-enhancement.ts'
 import type {
   ModelCatalog,
+  ModelEnvironmentPolicy,
+  PromptEnhancementRequest,
+  PromptEnhancementValue,
+  SessionModelEnvironmentRequest,
+  SessionModelEnvironmentValue,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -48,6 +61,8 @@ import type {
   SessionSearchRequest,
   SessionSearchValue,
   SessionSelectModelRequest,
+  SessionSelectModelRolesRequest,
+  SessionSelectModelRolesValue,
   SessionSelectModelValue,
   SessionTerminalCloseRequest,
   SessionTerminalCloseValue,
@@ -69,6 +84,7 @@ export type * from './types.ts'
 export { ApiSessionNotFound } from './agent.ts'
 export { SessionFileReferences } from './file-references.ts'
 export { SessionSkillCatalog } from './skill-catalog.ts'
+export { ModelEnvironmentError, resolveModelEnvironment } from './environment.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -79,16 +95,18 @@ declare module '@deepseek-ai/cordis' {
 
 /** Session Controller deployment policy. */
 export interface Config {
-  /** Maximum cold Session artifact size eligible for one full projection observation. */
-  readonly coldBlankProbeMaxBytes?: number
   /** Override platform desktop-opener detection. */
   readonly nativeOpen?: boolean
+  /** Default task policy used when binding a model environment to a Session. */
+  readonly modelEnvironmentPolicy?: ModelEnvironmentPolicy
 }
 
 /** Host integrations replaceable by direct unit tests. */
 export interface SessionControllerInternals {
   /** Native default-application handoff. */
   readonly openPath?: (path: string, signal: AbortSignal) => Promise<void>
+  /** Native file-manager handoff. */
+  readonly revealPath?: (path: string, signal: AbortSignal) => Promise<void>
   /** Native handoff availability probe. */
   readonly canOpenPath?: () => boolean
 }
@@ -99,6 +117,7 @@ export class SessionController extends TypertRemoteService {
     'agentDefaultModel',
     'agents',
     'attachments',
+    'fileUploads',
     'llm',
     'sessions',
     'sessionProjections',
@@ -109,8 +128,12 @@ export class SessionController extends TypertRemoteService {
   ]
 
   static Config: z<Config> = z.object({
-    coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
     nativeOpen: z.boolean(),
+    modelEnvironmentPolicy: z.object({
+      compaction: z.union(['basic', 'native', 'disabled'] as const).default('basic'),
+      background: z.union(['foreground', 'durable'] as const).default('foreground'),
+      parallelToolCalls: z.boolean().default(false),
+    }).default({ compaction: 'basic', background: 'foreground', parallelToolCalls: false }),
   })
 
   private readonly agents: ApiSessionAgentController
@@ -120,19 +143,32 @@ export class SessionController extends TypertRemoteService {
   private readonly terminal: SessionTerminalController
   private readonly listState: ApiSessionList
   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
+  private readonly revealPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
+  private readonly environmentPolicy: ModelEnvironmentPolicy
   private readonly promotions = new Set<Promise<void>>()
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
-   * @param config - cold-list observation policy.
+   * @param config - native-opener deployment policy.
+   * @param internals - host integrations replaceable by direct unit tests.
    */
   constructor(ctx: Context, config: Config, internals: SessionControllerInternals = {}) {
     super(ctx, 'sessionController', { namespace: 'session' })
     installModelSelectionProjection(ctx)
-    this.agents = new ApiSessionAgentController(ctx)
+    this.environmentPolicy = config.modelEnvironmentPolicy ?? {
+      compaction: 'basic', background: 'foreground', parallelToolCalls: false,
+    }
+    ctx.sessionProjections.register(modelEnvironmentProjection)
+    ctx.sessionProjections.register(modelRolesProjection)
+    this.agents = new ApiSessionAgentController(ctx, this.environmentPolicy)
     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
     this.terminal = new SessionTerminalController(ctx, this.agents)
+    ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId) => {
+      const result = await this.agents.resolveAgent(sessionId)
+      if ('error' in result) throw result.error
+      return result.agent
+    }), 'session-controller: file-upload Agent resolver')
     this.controlState = new SessionControlController(ctx)
     // Registered before history so reverse-order teardown closes every
     // follower before waiting for already-admitted promotions.
@@ -140,14 +176,13 @@ export class SessionController extends TypertRemoteService {
       await Promise.allSettled([...this.promotions])
     }, 'session-controller.promotions')
     this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation) })
-    this.listState = new ApiSessionList(
-      ctx,
-      config.coldBlankProbeMaxBytes ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES,
-    )
+    this.listState = new ApiSessionList(ctx)
     this.openPath = internals.openPath ?? openNativePath
+    this.revealPath = internals.revealPath ?? revealNativePath
     this.canOpenPath = internals.canOpenPath
       ?? (() => config.nativeOpen ?? (internals.openPath !== undefined || canOpenNativePath()))
     ctx.plugin(SessionFileReferences)
+    ctx.plugin(SessionMediaReferences)
     ctx.plugin(SessionSkillCatalog)
 
     ctx.on('session/created', (session) => {
@@ -263,6 +298,16 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
+   * Select the thinking and worker routes used by dual-model Sessions.
+   * @param request - Session identity, enable flag, and both exact routes.
+   * @returns normalized roles after exact route and environment validation.
+   */
+  @Remote('selectModelRoles')
+  selectModelRoles(request: SessionSelectModelRolesRequest): Promise<SessionSelectModelRolesValue> {
+    return this.commands.selectModelRoles(request)
+  }
+
+  /**
    * Describe every currently routable model for Host-generation selectors.
    * @returns provider-grouped models, the deployment default, and isolated provider failures.
    */
@@ -272,12 +317,92 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
+   * Resolve a secret-free execution plan for one exact model route.
+   * @param request - exact route, Agent preset, task policy, and overrides.
+   * @returns detached model environment plan with stable reason codes.
+   */
+  @Remote('modelEnvironment')
+  async modelEnvironment(request: SessionModelEnvironmentRequest): Promise<SessionModelEnvironmentValue> {
+    let resolved: LlmResolvedModelInfo
+    try {
+      resolved = await this.ctx.llm.resolveModelInfo(request.provider, request.model)
+    } catch {
+      throw new ModelEnvironmentError(
+        'model-environment/route-unavailable',
+        `model environment route "${request.provider}/${request.model}" is unavailable`,
+        { provider: request.provider, model: request.model },
+      )
+    }
+    const presets = this.ctx.get('agentPresets')
+    const preset = request.agentPreset ?? presets?.defaultId ?? 'default'
+    const availablePresets = presets === undefined
+      ? undefined
+      : (await presets.list()).map(item => item.id)
+    const environmentRequest = {
+      provider: request.provider,
+      model: request.model,
+      preset,
+      policy: request.policy,
+      ...(resolved.capabilities === undefined ? {} : { capabilities: resolved.capabilities }),
+      ...(availablePresets === undefined ? {} : { availablePresets }),
+      ...(request.overrides === undefined ? {} : { overrides: request.overrides }),
+    }
+    return {
+      plan: resolveModelEnvironment(environmentRequest),
+    }
+  }
+
+  /**
+   * Rewrite one draft with the model currently selected by the addressed Session.
+   * Project context is optional and remains bounded/read-only on the Host.
+   * @param request - Session, exact selected route, draft, and project-context choice.
+   * @param signal - cancellation owned by the Remote unary carrier.
+   * @returns the improved draft; the original is never persisted or mutated here.
+   */
+  @Remote('enhancePrompt')
+  async enhancePrompt(
+    request: PromptEnhancementRequest,
+    signal: AbortSignal,
+  ): Promise<PromptEnhancementValue> {
+    signal.throwIfAborted()
+    if (typeof request.readProject !== 'boolean') {
+      throw new RemoteError(
+        'session/prompt-enhancement-invalid',
+        'readProject must be a boolean',
+        { reason: 'INVALID_REQUEST' },
+      )
+    }
+    const result = await this.agents.resolveAgent(request.sessionId)
+    if ('error' in result) throw result.error
+    const current = this.agents.selectionFor(result.agent).current
+    if (current.provider !== request.provider
+      || current.model !== request.model
+      || current.reasoningEffort !== request.reasoningEffort) {
+      throw new RemoteError(
+        'session/prompt-enhancement-invalid',
+        'the selected model changed; refresh the composer and try again',
+        { reason: 'STALE_MODEL' },
+      )
+    }
+    return enhancePromptDraft(this.ctx, result.agent, request, signal)
+  }
+
+  /**
    * Report whether this deployment can hand a Session workspace path to a native desktop.
    * @returns true when the matching open operation is available.
    */
   @Remote
   canOpenWorkspacePath(): boolean {
     return this.canOpenPath()
+  }
+
+  /**
+   * Describe the serving desktop for authenticated file-action routes.
+   * @returns Host name, configured availability, and platform-specific file-manager behavior.
+   */
+  workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 'explorer' | 'directory' | null } {
+    const fileManager = nativeFileManager()
+    return { name: hostname(), available: fileManager !== null && this.canOpenPath(), fileManager }
   }
 
   /**
@@ -301,7 +426,8 @@ export class SessionController extends TypertRemoteService {
     }
     signal.throwIfAborted()
     try {
-      await this.openPath(request.path, signal)
+      if (request.action === 'reveal') await this.revealPath(request.path, signal)
+      else await this.openPath(request.path, signal)
       return { opened: true }
     } catch (error: unknown) {
       if (signal.aborted) throw new RemoteError('gateway/cancelled', 'path open was aborted', {})
@@ -375,37 +501,61 @@ export class SessionController extends TypertRemoteService {
     return this.commands.cancel(request)
   }
 
-  /** List shell PTYs owned by the addressed Session Agent. */
+  /**
+   * List shell PTYs owned by the addressed Session Agent.
+   * @param request - Session identity for the terminal listing.
+   * @returns the current terminal snapshots.
+   */
   @Remote('terminalList')
   terminalList(request: SessionTerminalListRequest): Promise<SessionTerminalListValue> {
     return this.terminal.list(request)
   }
 
-  /** Create one shell PTY rooted at the Session workspace. */
+  /**
+   * Create one shell PTY rooted at the Session workspace.
+   * @param request - Session identity and terminal launch options.
+   * @returns the created terminal snapshot.
+   */
   @Remote('terminalOpen')
   terminalOpen(request: SessionTerminalOpenRequest): Promise<SessionTerminalOpenValue> {
     return this.terminal.open(request)
   }
 
-  /** Submit text to one Session-owned PTY and wait for its next boundary. */
+  /**
+   * Submit text to one Session-owned PTY and wait for its next boundary.
+   * @param request - Session identity, terminal identity, and input text.
+   * @returns the terminal state observed after sending input.
+   */
   @Remote('terminalSend')
   terminalSend(request: SessionTerminalSendRequest): Promise<SessionTerminalSendValue> {
     return this.terminal.send(request)
   }
 
-  /** Read one bounded page from a Session-owned PTY scrollback. */
+  /**
+   * Read one bounded page from a Session-owned PTY scrollback.
+   * @param request - Session identity, terminal identity, and read cursor.
+   * @returns one bounded scrollback page and its cursor.
+   */
   @Remote('terminalRead')
   terminalRead(request: SessionTerminalReadRequest): Promise<SessionTerminalReadValue> {
     return this.terminal.read(request)
   }
 
-  /** Deliver one allowed signal to a Session-owned PTY foreground process group. */
+  /**
+   * Deliver one allowed signal to a Session-owned PTY foreground process group.
+   * @param request - Session identity, terminal identity, and signal name.
+   * @returns the terminal state observed after delivering the signal.
+   */
   @Remote('terminalSignal')
   terminalSignal(request: SessionTerminalSignalRequest): Promise<SessionTerminalSignalValue> {
     return this.terminal.signal(request)
   }
 
-  /** Close one Session-owned PTY and await its process tree. */
+  /**
+   * Close one Session-owned PTY and await its process tree.
+   * @param request - Session identity and terminal identity.
+   * @returns the terminal state after closure.
+   */
   @Remote('terminalClose')
   terminalClose(request: SessionTerminalCloseRequest): Promise<SessionTerminalCloseValue> {
     return this.terminal.close(request)
@@ -426,7 +576,8 @@ export class SessionController extends TypertRemoteService {
    * Follow one Session log from its opening or resume cursor.
    * @param request - durable address and last committed sequence already held by the caller.
    * @param signal - cancellation owned by the Remote stream carrier.
-   * @returns a complete opening snapshot followed by gap-free event frames.
+   * @returns a complete opening snapshot followed by gap-free durable event
+   *   frames and optional cursorless assistant-stream frames.
    */
   @Remote({ mode: 'stream' })
   follow(request: SessionFollowRequest, signal: AbortSignal): AsyncIterable<SessionFollowFrame> {
